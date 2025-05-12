@@ -1,79 +1,139 @@
+# Agar.io 2D - Versión por Consola y Pygame
 
-# Agar.io Simplificado con Winsockets en C (agar-winsock-c)
+Este proyecto es un clon simplificado de Agar.io con gráficos en 2D usando Pygame en el cliente, y un servidor en C para manejar el estado del juego. Los jugadores pueden conectarse a través de red local y competir por recolectar comida y crecer. También es posible agregar **bots automáticos** como oponentes.
 
-Este proyecto es una implementación simplificada del juego multijugador **Agar.io**, desarrollada en C utilizando **Winsockets**. Utiliza una arquitectura cliente-servidor para permitir que múltiples jugadores se conecten, se muevan en un entorno compartido y compitan por comida y tamaño. Incluye además herramientas de prueba y visualización en Python.
+## 🎮 ¿Cómo jugar?
 
-## Características
+1. **Inicia el servidor**
+   - Compila `server.c` en Windows:
+     ```bash
+     gcc server.c -o server -lws2_32
+     ```
+   - Luego ejecuta el servidor:
+     ```bash
+     ./server
+     ```
 
-- Arquitectura cliente-servidor con Winsockets (TCP)
-- Manejo de múltiples clientes concurrentes
-- Detección de colisiones y lógica de "comer"
-- Consola como interfaz para cliente
-- Scripts de prueba automática y bots simulados
-- Visualización experimental con Pygame
+2. **Ejecuta el cliente Pygame**
+   - Asegúrate de tener Python 3 y `pygame` instalado:
+     ```bash
+     pip install pygame
+     ```
+   - Ejecuta el cliente:
+     ```bash
+     python client_pygame.py
+     ```
 
-## Estructura del proyecto
+3. **Controles del jugador**
+   - Usa las **flechas del teclado** para mover tu célula:
+     - ⬆️ Arriba
+     - ⬇️ Abajo
+     - ⬅️ Izquierda
+     - ➡️ Derecha
 
+   - Come comida amarilla para crecer.
+   - Puedes absorber a otros jugadores si eres más grande que ellos.
+
+---
+
+## 🤖 Añadir bots (opcional)
+
+### Opción 1: Ejecutar manualmente varios bots
+
+Puedes lanzar uno o más **bots automáticos** que se conectan al servidor y se mueven aleatoriamente.
+
+1. Crea un archivo llamado `bot_client.py` con este contenido:
+   *(Este archivo ya te fue proporcionado anteriormente)*
+
+2. Ejecuta uno o varios bots desde diferentes terminales:
+   ```bash
+   python bot_client.py
+   ```
+
+### Opción 2: Ejecutar múltiples bots automáticamente
+
+#### Script en Python (`run_bots.py`)
+
+Este script lanza varios bots automáticamente:
+
+```python
+import subprocess
+import time
+
+BOT_COUNT = 5  # Cambia este número para más bots
+
+for i in range(BOT_COUNT):
+    subprocess.Popen(["python", "bot_client.py"])
+    time.sleep(0.2)
 ```
-├── server.c              # Código del servidor
-├── client.c              # Código del cliente
-├── client.exe            # Ejecutable cliente
-├── server.exe            # Ejecutable servidor
-├── bot_client.py         # Cliente simulado para bots
-├── client_pygame.py      # Cliente con visualización gráfica (experimental)
-├── autotest.py           # Script de pruebas automatizadas
-├── run_bots.py           # Ejecuta múltiples bots para pruebas
-├── run_bots.bat          # Script batch para lanzar bots en Windows
-├── viewer.py             # Herramienta de visualización de estado
-├── .vscode/              # Configuración de entorno para Visual Studio Code
-└── Memoria.docx          # Documento con especificación y resultados
-```
 
-## Cómo ejecutar
-
-### Requisitos
-
-- Windows con soporte para Winsockets
-- Compilador C compatible (Visual Studio recomendado)
-- Python 3.x (para los scripts y visualizadores)
-
-### Compilación
-
-Puedes compilar los archivos `.c` con Visual Studio o usando este comando (en Windows):
+Ejecuta con:
 
 ```bash
-cl /D_CRT_SECURE_NO_WARNINGS server.c ws2_32.lib
-cl /D_CRT_SECURE_NO_WARNINGS client.c ws2_32.lib
+python run_bots.py
 ```
 
-### Ejecución
+#### Script para Windows (`run_bots.bat`)
 
-1. Inicia el servidor:
-   ```bash
-   server.exe
+Crea un archivo llamado `run_bots.bat`:
+
+```bat
+@echo off
+setlocal enabledelayedexpansion
+
+set BOTS=5
+
+for /L %%i in (1,1,%BOTS%) do (
+    start python bot_client.py
+    timeout /t 1 >nul
+)
+```
+
+Ejecuta haciendo doble clic o desde la terminal:
+
+```cmd
+run_bots.bat
+```
+
+Esto abrirá varias ventanas, cada una ejecutando un bot.
+
+
+
+Puedes lanzar uno o más **bots automáticos** que se conectan al servidor y se mueven aleatoriamente.
+
+
+## 🌐 Modo multijugador local
+
+Puedes tener hasta **10 jugadores conectados al mismo tiempo** en red local.
+
+1. Ejecuta el servidor en una máquina.
+2. En cada dispositivo (cliente), asegúrate de que `client_pygame.py` esté configurado para conectarse a la IP del servidor:
+   ```python
+   sock.connect(("IP_DEL_SERVIDOR", 12345))
    ```
+3. Ejecuta `client_pygame.py` en cada cliente.
 
-2. Abre otra terminal y lanza uno o más clientes:
-   ```bash
-   client.exe
-   ```
+---
 
-3. (Opcional) Ejecuta bots para pruebas:
-   ```bash
-   python run_bots.py
-   ```
+## 🛠 Requisitos
 
-## Pruebas
+- **Servidor:**
+  - Windows
+  - Compilador `gcc` con `ws2_32.lib`
+- **Cliente:**
+  - Python 3.7+
+  - `pygame` (`pip install pygame`)
 
-El sistema incluye scripts para pruebas automatizadas y simulación de carga usando bots. Las pruebas verifican la conexión simultánea, movimiento, colisiones y estabilidad general del sistema.
+---
 
+## 📌 Notas
 
-## Licencia
+- El servidor envía el estado del juego a todos los clientes cada 200 ms.
+- Si un jugador cierra la ventana, se desconecta automáticamente.
+- El juego no guarda estado; al cerrar el servidor, todo se reinicia.
 
-Este proyecto está licenciado bajo la Licencia MIT. Consulta el archivo `LICENSE` para más detalles.
+---
 
-## Créditos
+## 📄 Licencia
 
-Desarrollado como parte de un proyecto académico para explorar programación en red y diseño de juegos multijugador.
-
-Inspirado en el juego original [Agar.io](https://agar.io).
+Este proyecto es de uso libre para fines educativos y recreativos.
