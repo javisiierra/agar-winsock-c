@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Compilar winsock_minimo",
+      "type": "shell",
+      "command": "gcc",
+      "args": [
+        "winsock_minimo.c",
+        "-o",
+        "winsock_minimo.exe",
+        "-lws2_32"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Ejecutar winsock_minimo",
+      "type": "shell",
+      "command": ".\\winsock_minimo.exe",
+      "dependsOn": "Compilar winsock_minimo",
+      "group": "test"
+    }
+  ]
+}
