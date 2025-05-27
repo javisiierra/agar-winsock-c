@@ -2,12 +2,9 @@
 #include <winsock2.h>
 #pragma comment(lib, "ws2_32.lib")
 #include "mensajes.h"
-#include <time.h>   // Para clock_gettime (asumiendo que MinGW lo proporciona)
-// #include <unistd.h> // Para usleep. Considerar Sleep() de Windows si usleep no está disponible.
-// Si usleep no está en tu <unistd.h> de MinGW, puedes usar Sleep() de <windows.h>
-// Sleep() toma milisegundos. Para microsegundos, necesitarías algo más o aceptar la granularidad de ms.
+#include <time.h>   
 
-// Definir la versión mínima de Windows ANTES de incluir windows.h
+
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
 #endif
@@ -16,20 +13,57 @@
 
 #include <stdlib.h>
 #define MAX_ENTIDADES 1000
+HANDLE eventoEnviarActualizacion;
 
-typedef enum {
-    ENTIDAD_JUGADOR,
-    ENTIDAD_COMIDA,
-} TipoEntidad;
 
 
 
 typedef struct {
-    int id;           // Identificador único de la entidad
-    TipoEntidad tipo; // Tipo de entidad (p.ej. 0: jugador, 1: comida, 2: virus, etc.)
-    Vector2D pos;      // Coordenadas de la entidad
-    Vector2D dir;      // Dirección de movimiento de la entidad
-} Entidad;
+    Entidad entidades[MAX_ENTIDADES];
+    int num_entidades;
+    CRITICAL_SECTION mutex;
+} ArrayEntidadesConMutex;
+
+ArrayEntidadesConMutex arrayEntidadesJugadores;
+ArrayEntidadesConMutex arrayEntidadesComidas;
+
+
+// metodo para inicializar ArrayEntidadesConMutex
+void inicializarArrayEntidadesConMutex(ArrayEntidadesConMutex* array) {
+    InitializeCriticalSection(&array->mutex);
+    array->num_entidades = 0;
+}
+
+
+// metodo que recorre todo el array de entidades y devuelve la entidad que tenga el id y el tipo especificado
+Entidad* getArrayEntidadesConMutex(ArrayEntidadesConMutex* array, int id) {
+    EnterCriticalSection(&array->mutex); // cierro
+    for (int i = 0; i < array->num_entidades; i++) {
+        if (array->entidades[i].id == id) {
+            LeaveCriticalSection(&array->mutex); // libero
+            return &array->entidades[i];
+        }
+    }
+    LeaveCriticalSection(&array->mutex); // abro
+    return NULL;
+}
+
+
+// metodo que borra un elemento de un array de entidades
+void removeArrayEntidadesConMutex(ArrayEntidadesConMutex* array, int id) {
+    EnterCriticalSection(&array->mutex); // cerrarr
+    for (int i = 0; i < array->num_entidades; i++) {
+        if (array->entidades[i].id == id) {
+            for (int j = i; j < array->num_entidades - 1; j++) {
+                array->entidades[j] = array->entidades[j + 1];
+            }
+            array->num_entidades--;
+            LeaveCriticalSection(&array->mutex); // abrir
+            return;
+        }
+    }
+    LeaveCriticalSection(&array->mutex); // abrir
+}
 
 
 typedef struct {
@@ -41,11 +75,7 @@ typedef struct {
 
 typedef struct {
     int client_id;         // Identificador único del cliente
-    char data[256];        // Buffer con los datos o comando recibido
     Vector2D dir_nueva;
-    
-    // int command_type;
-    // int data_length;
 } MensajeRecibido;
 
 typedef struct {
@@ -73,7 +103,6 @@ int contador_entidades = 0;
 
 volatile int running = 1; // bandera global para controlar el bucle
 
-
 DWORD WINAPI manejar_cliente(LPVOID arg);
 DWORD WINAPI bucle_aceptar_solicitudes(LPVOID arg);
 void process_game_tick();
@@ -84,12 +113,30 @@ Entidad* buscar_entidad(TipoEntidad tipo, int id);
 int agregar_entidad(TipoEntidad tipo, int id, float x, float y);
 
 
+
 void printHora(char *mensaje) {
     SYSTEMTIME st;
     GetSystemTime(&st);
     printf("[%02d:%02d:%02d.%03d - %d] %s\n",
         st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, GetCurrentThreadId(), mensaje);
 }
+
+
+int addArrayEntidadesConMutex(ArrayEntidadesConMutex* array, Entidad entidad) {
+    // se verrifica si hay espacio en el array
+    EnterCriticalSection(&array->mutex);
+    if (array->num_entidades >= MAX_ENTIDADES) {
+        LeaveCriticalSection(&array->mutex);
+        printHora("Array de entidades lleno");
+        return -1;
+    }
+    
+    array->entidades[array->num_entidades] = entidad;
+    array->num_entidades++;
+    LeaveCriticalSection(&array->mutex);
+    return 0;
+}
+
 
 
 int num_clientes = 0;
@@ -102,57 +149,22 @@ int num_clientes = 0;
 
 
 // Declaración global de la cola segura para hilos
-ThreadSafeQueue queue;
+ThreadSafeQueue colaMensajes;
 int main(){
 
     WSADATA wsa;
+    eventoEnviarActualizacion = CreateEvent(NULL, TRUE, FALSE, NULL);
+     inicializarArrayEntidadesConMutex(&arrayEntidadesJugadores);
+     //inicializarArrayEntidadesConMutex(&arrayEntidadesComidas);
 
     if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
         printHora("Error inicializando Winsock");
         return 1;
     }
 
-    // ahora tengo que crear el socket
+
 
     SOCKET servidor_sock;
-    // ------------------------------
-    // Creación de un socket en Winsock
-    // ------------------------------
-
-    // La función socket() se utiliza para crear un nuevo socket de red.
-    // Su prototipo es: SOCKET socket(int af, int type, int protocol);
-    //
-    // Parámetros:
-    //   1. af (Address Family): Especifica la familia de direcciones a utilizar.
-    //      - AF_INET: Indica que se usará la familia de direcciones IPv4.
-    //
-    //   2. type (Tipo de socket): Define el comportamiento del canal de comunicación.
-    //      - SOCK_STREAM: Crea un socket de tipo flujo, que transmite datos como una
-    //        secuencia continua de bytes (usado por TCP). Garantiza entrega ordenada,
-    //        confiable y sin duplicados.
-    //      - SOCK_DGRAM: Crea un socket de tipo datagrama, que transmite datos en
-    //        paquetes independientes llamados datagramas (usado por UDP). No garantiza
-    //        entrega ni orden.
-    //
-    //   3. protocol (Protocolo): Especifica el protocolo concreto a utilizar.
-    //      - IPPROTO_TCP: Protocolo TCP (usualmente se usa con SOCK_STREAM).
-    //      - IPPROTO_UDP: Protocolo UDP (usualmente se usa con SOCK_DGRAM).
-    //      - 0: Permite que el sistema seleccione automáticamente el protocolo adecuado
-    //        según la combinación de familia y tipo de socket. Por ejemplo, si se elige
-    //        AF_INET y SOCK_STREAM, el sistema seleccionará TCP.
-    //
-    // Notas importantes:
-    //   - El segundo parámetro (type) determina si el socket usará un flujo de datos
-    //     confiable y orientado a conexión (TCP/segmentos) o datagramas independientes (UDP).
-    //   - El tercer parámetro (protocol) especifica el protocolo exacto, pero normalmente
-    //     se puede dejar en 0 para que el sistema elija el más apropiado.
-    //   - Ambos parámetros afectan tanto el envío como la recepción de datos; no se dividen
-    //     en "enviar" o "recibir".
-    //
-    // Valor de retorno:
-    //   - Si la creación del socket es exitosa, se devuelve un descriptor de socket válido.
-    //   - Si ocurre un error, se devuelve INVALID_SOCKET.
-    //
 
     servidor_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (servidor_sock == INVALID_SOCKET) {
@@ -162,9 +174,6 @@ int main(){
     }
 
     struct sockaddr_in addr;
-    // ----------------------------------------
-    // Inicialización de la estructura sockaddr_in
-    // ----------------------------------------
 
     // typedef struct sockaddr_in {
     //     short          sin_family;
@@ -173,62 +182,12 @@ int main(){
     //     char           sin_zero[8];
     //   } SOCKADDR_IN, *PSOCKADDR_IN, *LPSOCKADDR_IN;
 
-    // sin_family: Especifica la familia de direcciones que se va a utilizar.
-    //   - Debe establecerse en AF_INET para indicar que se usará IPv4.
-    //   - Este valor es obligatorio para que las funciones de sockets
-    // interpreten correctamente la estructura.
-    // ALTERNATIVA A AF_INET: AF_UNSPEC, que significa "no especificada"; 
-    // que significa que el socket puede ser usado para cualquier familia de direcciones.
-    // Tambien se puede usar AF_INET6 para IPv6.
     addr.sin_family = AF_INET;
 
-    // sin_addr.s_addr: Especifica la dirección IP a la que se asociará el socket.
-    //   - inet_addr("192.168.1.1") convierte la dirección IP en formato texto
-    //  a un valor binario de 32 bits en "network byte order" (orden de bytes de red).
-    //   - El campo sin_addr es una estructura (struct in_addr) cuyo miembro
-    // s_addr almacena la dirección IP.
-    // La estructura in_addr de sin_addr es:
-    //struct in_addr {
-    //    union {
-    //      struct {
-    //        u_char s_b1;
-    //        u_char s_b2;
-    //        u_char s_b3;
-    //        u_char s_b4;
-    //      } S_un_b;
-    //      struct {
-    //        u_short s_w1;
-    //        u_short s_w2;
-    //      } S_un_w;
-    //      u_long S_addr;
-    //    } S_un;
-    //  };
-    //   - Si se desea aceptar conexiones en cualquier interfaz local,
-    // se puede usar INADDR_ANY en lugar de una IP concreta.
         addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // cualquier IP
 
 
-
-    // sin_port: Especifica el número de puerto en el que el socket 
-    // escuchará o al que se conectará.
-    //   - El puerto debe estar en "network byte order" (big endian), 
-    // por eso se utiliza la función htons() ("host to network short").
-    //   - Esto garantiza la portabilidad entre diferentes arquitecturas,
-    //  ya que cada sistema puede almacenar los números en un orden de bytes distinto.
-    //   - En este ejemplo, se está configurando el puerto 8080.
     addr.sin_port = htons(8080);
-
-    // Nota adicional:
-    // La estructura sockaddr_in se utiliza habitualmente para definir
-    //  la dirección y el puerto de un socket IPv4 en operaciones como bind(),
-    //  connect(), sendto(), etc.
-    // Al pasar esta estructura a funciones de la API de sockets, se
-    //  suele castear a (struct sockaddr*) porque las funciones esperan un puntero
-    //  genérico a sockaddr.
-    // Es recomendable inicializar el campo sin_zero a cero usando memset o bzero,
-    //  aunque en la mayoría de los casos no es estrictamente necesario, ya que
-    //  solo sirve de relleno para igualar el tamaño de struct sockaddr.
-
 
 
     // bind() asocia el socket con una dirección y un puerto
@@ -285,7 +244,7 @@ int main(){
             QueryPerformanceFrequency(&frequency);      // Obtiene la frecuencia del contador
             QueryPerformanceCounter(&last_tick_time_qpc); // Obtiene el tiempo inicial
 
-            queue_init(&queue);
+            queue_init(&colaMensajes);
             while (running) {
                 process_game_tick();
 
@@ -341,10 +300,39 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
 
     bytes_recibidos = recv(cliente_sock, (char*)&mensaje_recibido, sizeof(mensaje_recibido), 0);
     // si recibimos algo que no sea un 1, dejamos de atender al cliente
-    if(mensaje_recibido != 1){
+    if(mensaje_recibido != UNIRSE_A_PARTIDA){
         printHora("Mensaje del cliente desconocido, no se puede atender");
         closesocket(cliente_sock);
         return 0;
+    } else {
+        printHora("Unirse a partida recibido");
+        printf("Se le ha asignado el thread con id %d\n", GetCurrentThreadId());
+        Entidad entidad_jugador;
+        entidad_jugador.id = GetCurrentThreadId();
+        entidad_jugador.pos.x = 0;
+        entidad_jugador.pos.y = 0;
+        entidad_jugador.dir.x = 0;
+        entidad_jugador.dir.y = 0;
+
+        if (addArrayEntidadesConMutex(&arrayEntidadesJugadores, entidad_jugador) != 0) {
+            printHora("No se ha podido agregar una nueva entidad al array");
+            closesocket(cliente_sock);
+            return 0;
+        }
+
+        // Le enviamos al cliente su ID asignado.
+        if (send(cliente_sock, (char*)&entidad_jugador.id, sizeof(entidad_jugador.id), 0) == SOCKET_ERROR) {
+            printHora("Error al enviar el ID del jugador al cliente");
+            closesocket(cliente_sock);
+            return 0;
+        } else {
+            char debug_msg[256];
+            sprintf(debug_msg, "ID %d enviado al cliente", entidad_jugador.id);
+            printHora(debug_msg);
+        }
+
+   
+
     }
 
 
@@ -352,6 +340,7 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
 
         Vector2D vec;
         
+        // recibimos el vector de direccion del jugador
         bytes_recibidos = recv(cliente_sock, (char*)&vec, sizeof(vec), 0);
 
 
@@ -366,19 +355,21 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
 
 
             char mensaje[1024];
+
             printHora(mensaje);
 
 
             // XXX
             MensajeRecibido msg;
-            strncpy(msg.data, buffer, sizeof(msg.data) - 1);
-            msg.data[sizeof(msg.data) - 1] = '\0';
-            msg.client_id = GetCurrentThreadId(); // el id sera el identificador del thread
-            msg.vec = vec;
-            queue_enqueue(&queue, msg);
+            msg.client_id = GetCurrentThreadId(); // el id sera el identificador del thread (de momento thread ID = ID DEL JUGADOR)
+            msg.dir_nueva = vec;
+            queue_enqueue(&colaMensajes, msg);
             // XXX
 
-            send(cliente_sock, "Recibido", strlen("Recibido"), 0);
+
+            WaitForSingleObject(eventoEnviarActualizacion, INFINITE);
+
+            send(cliente_sock, (char*)arrayEntidadesJugadores.entidades, arrayEntidadesJugadores.num_entidades * sizeof(Entidad), 0);
 
 
         } else if(bytes_recibidos == 0){
@@ -480,12 +471,37 @@ void process_game_tick() {
     char buffer[256];
 
 
-    while(queue_dequeue(&queue, &msg)){
-        // sprintf(buffer, "Cliente %d envia el mensaje: %s", msg.client_id, msg.data);
-        sprintf(buffer, "Cliente %d envia el vector: %f, %f", msg.client_id, msg.vec.x, msg.vec.y);
+    while(queue_dequeue(&colaMensajes, &msg)){
+
+        printf("-\n");
+        sprintf(buffer, "Cliente %d envia el vector: %f, %f", msg.client_id, msg.dir_nueva.x, msg.dir_nueva.y);
         printHora(buffer);
+        // recorremos el array de entidades y actualizamos la direccion de las entidades
+        
+        Entidad *ent = getArrayEntidadesConMutex(&arrayEntidadesJugadores, msg.client_id); // >>> ESTO NO GARANTIZA LA EXCLUSION MUTUA. Puedo 
+        // usar entidad despues de haber liberado el mutex porque tengo un puntero.
+
+
+        if(ent != NULL){
+            ent->dir = msg.dir_nueva;
+        } else{
+            sprintf(buffer, "No se ha encontrado la entidad con id %d", msg.client_id);
+            printHora(buffer);
+        }
+
+        // actualizamos la posicion de las entidades
+        for(int i = 0; i < arrayEntidadesJugadores.num_entidades; i++){
+            Entidad* ent = &arrayEntidadesJugadores.entidades[i];
+            ent->pos.x += ent->dir.x;
+            ent->pos.y += ent->dir.y;
+        }
+
     }
+
+    SetEvent(eventoEnviarActualizacion);
     
+    // Restablecer para el siguiente tick
+    ResetEvent(eventoEnviarActualizacion);
     printHora("Fin TICK");
 }
 
@@ -496,6 +512,7 @@ void queue_init(ThreadSafeQueue* q) {
 }
 
 void queue_enqueue(ThreadSafeQueue* q, MensajeRecibido msg) {
+    printf("+\n");
     Node* node = malloc(sizeof(Node));
     node->msg = msg;
     node->next = NULL;
@@ -542,7 +559,7 @@ void queue_destroy(ThreadSafeQueue* q) {
     q->head = q->tail = NULL;
 
     DeleteCriticalSection(&q->mutex);
-    // CONDITION_VARIABLE no tiene una función de "delete" explícita.
+
 }
 
 
