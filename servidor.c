@@ -4,7 +4,6 @@
 #include "mensajes.h"
 #include <time.h>   
 
-
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
 #endif
@@ -15,9 +14,6 @@
 #define MAX_ENTIDADES 1000
 HANDLE eventoEnviarActualizacion;
 
-
-
-
 typedef struct {
     Entidad entidades[MAX_ENTIDADES];
     int num_entidades;
@@ -27,13 +23,11 @@ typedef struct {
 ArrayEntidadesConMutex arrayEntidadesJugadores;
 ArrayEntidadesConMutex arrayEntidadesComidas;
 
-
 // metodo para inicializar ArrayEntidadesConMutex
 void inicializarArrayEntidadesConMutex(ArrayEntidadesConMutex* array) {
     InitializeCriticalSection(&array->mutex);
     array->num_entidades = 0;
 }
-
 
 // metodo que recorre todo el array de entidades y devuelve la entidad que tenga el id y el tipo especificado
 Entidad* getArrayEntidadesConMutex(ArrayEntidadesConMutex* array, int id) {
@@ -47,7 +41,6 @@ Entidad* getArrayEntidadesConMutex(ArrayEntidadesConMutex* array, int id) {
     LeaveCriticalSection(&array->mutex); // abro
     return NULL;
 }
-
 
 // metodo que borra un elemento de un array de entidades
 void removeArrayEntidadesConMutex(ArrayEntidadesConMutex* array, int id) {
@@ -65,13 +58,10 @@ void removeArrayEntidadesConMutex(ArrayEntidadesConMutex* array, int id) {
     LeaveCriticalSection(&array->mutex); // abrir
 }
 
-
 typedef struct {
     Entidad entidad;
     CRITICAL_SECTION mutex;
 } SafeEntidad;
-
-
 
 typedef struct {
     int client_id;         // Identificador único del cliente
@@ -95,11 +85,8 @@ typedef struct {
     CONDITION_VARIABLE cond; // Opcional, para notificar al Game Master
 } ThreadSafeQueue;
 
-
-
 SafeEntidad entidades[MAX_ENTIDADES];
 int contador_entidades = 0; 
-
 
 volatile int running = 1; // bandera global para controlar el bucle
 
@@ -112,15 +99,12 @@ void queue_enqueue(ThreadSafeQueue* q, MensajeRecibido msg);
 Entidad* buscar_entidad(TipoEntidad tipo, int id);
 int agregar_entidad(TipoEntidad tipo, int id, float x, float y);
 
-
-
 void printHora(char *mensaje) {
     SYSTEMTIME st;
     GetSystemTime(&st);
     printf("[%02d:%02d:%02d.%03d - %d] %s\n",
         st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, GetCurrentThreadId(), mensaje);
 }
-
 
 int addArrayEntidadesConMutex(ArrayEntidadesConMutex* array, Entidad entidad) {
     // se verrifica si hay espacio en el array
@@ -137,19 +121,15 @@ int addArrayEntidadesConMutex(ArrayEntidadesConMutex* array, Entidad entidad) {
     return 0;
 }
 
-
-
 int num_clientes = 0;
 // cliente_info clientes[10];
-
 
 #define TICK_RATE 100 // ticks por segundo
 #define TICK_INTERVAL_MS (1000 / TICK_RATE) // Intervalo en MILISEGUNDOS
 
-
-
 // Declaración global de la cola segura para hilos
 ThreadSafeQueue colaMensajes;
+
 int main(){
 
     WSADATA wsa;
@@ -161,8 +141,6 @@ int main(){
         printHora("Error inicializando Winsock");
         return 1;
     }
-
-
 
     SOCKET servidor_sock;
 
@@ -186,9 +164,7 @@ int main(){
 
         addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // cualquier IP
 
-
     addr.sin_port = htons(8080);
-
 
     // bind() asocia el socket con una dirección y un puerto
     if(bind(servidor_sock, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
@@ -197,8 +173,6 @@ int main(){
         WSACleanup();
         return 1;
     }
-
-
 
         if(listen(servidor_sock, 1) == SOCKET_ERROR) {
             printHora("Error en listen");
@@ -231,12 +205,9 @@ int main(){
     // // Esperamos a que el hilo termine:
     // WaitForSingleObject(hilo_aceptador, INFINITE);
 
-
     // Desde aqui nos encargaremos de la logica principal del juego.
     // Tareas: inicializar un reloj, a una frecuencia de 50 hz. Este sera nuestro tick
     // IA, hazlo
-
-
 
             LARGE_INTEGER frequency;
             LARGE_INTEGER last_tick_time_qpc, current_tick_time_qpc;
@@ -274,12 +245,8 @@ int main(){
                 QueryPerformanceCounter(&last_tick_time_qpc);
             }
 
-
-
-
-    return 0;
+            return 0;
 }
-
 
 DWORD WINAPI manejar_cliente(LPVOID arg){
 
@@ -292,9 +259,6 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
 
     SafeEntidad* entidad;
 
-
-
-
     // PRIMERA CONEXION DEL CLIENTE
     int mensaje_recibido;
 
@@ -303,6 +267,8 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
     if(mensaje_recibido != UNIRSE_A_PARTIDA){
         printHora("Mensaje del cliente desconocido, no se puede atender");
         closesocket(cliente_sock);
+        // NUEVO: Decrementar contador de clientes
+        num_clientes--;
         return 0;
     } else {
         printHora("Unirse a partida recibido");
@@ -317,6 +283,8 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
         if (addArrayEntidadesConMutex(&arrayEntidadesJugadores, entidad_jugador) != 0) {
             printHora("No se ha podido agregar una nueva entidad al array");
             closesocket(cliente_sock);
+            // NUEVO: Decrementar contador de clientes
+            num_clientes--;
             return 0;
         }
 
@@ -324,17 +292,16 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
         if (send(cliente_sock, (char*)&entidad_jugador.id, sizeof(entidad_jugador.id), 0) == SOCKET_ERROR) {
             printHora("Error al enviar el ID del jugador al cliente");
             closesocket(cliente_sock);
+            // NUEVO: Eliminar la entidad que acabamos de crear y decrementar contador
+            removeArrayEntidadesConMutex(&arrayEntidadesJugadores, entidad_jugador.id);
+            num_clientes--;
             return 0;
         } else {
             char debug_msg[256];
             sprintf(debug_msg, "ID %d enviado al cliente", entidad_jugador.id);
             printHora(debug_msg);
         }
-
-   
-
     }
-
 
     while(1){ // En este bucle se atiende la partida del jugador
 
@@ -342,7 +309,6 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
         
         // recibimos el vector de direccion del jugador
         bytes_recibidos = recv(cliente_sock, (char*)&vec, sizeof(vec), 0);
-
 
         printf("bytes_recibidos: %d\n", bytes_recibidos);
 
@@ -353,11 +319,9 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
 
         if(bytes_recibidos > 0){
 
-
             char mensaje[1024];
 
             printHora(mensaje);
-
 
             // XXX
             MensajeRecibido msg;
@@ -366,11 +330,9 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
             queue_enqueue(&colaMensajes, msg);
             // XXX
 
-
             WaitForSingleObject(eventoEnviarActualizacion, INFINITE);
 
             send(cliente_sock, (char*)arrayEntidadesJugadores.entidades, arrayEntidadesJugadores.num_entidades * sizeof(Entidad), 0);
-
 
         } else if(bytes_recibidos == 0){
             printHora("Cliente desconectado");
@@ -386,10 +348,21 @@ DWORD WINAPI manejar_cliente(LPVOID arg){
             closesocket(cliente_sock);
             break;
         }
-
-
     }
 
+    // NUEVO: Limpieza al desconectar cliente
+    int client_id = GetCurrentThreadId();
+    
+    // Eliminar la entidad del cliente del array
+    removeArrayEntidadesConMutex(&arrayEntidadesJugadores, client_id);
+    
+    // Decrementar el contador de clientes
+    num_clientes--;
+    
+    // Mensaje de depuración
+    char cleanup_msg[256];
+    sprintf(cleanup_msg, "Cliente %d eliminado del juego. Clientes activos: %d", client_id, num_clientes);
+    printHora(cleanup_msg);
 
     printHora("Cliente desconectado");
     closesocket(cliente_sock);
@@ -428,7 +401,6 @@ DWORD WINAPI bucle_aceptar_solicitudes(LPVOID arg){
         // clientes[num_clientes] = cliente_inf;
         num_clientes++;
 
-
             // Crear el hilo
             // HANDLE hilo:
                 // Es el identificador que Windows asigna al hilo recién creado.
@@ -451,7 +423,6 @@ DWORD WINAPI bucle_aceptar_solicitudes(LPVOID arg){
             continue;
         }
 
-
         // CloseHandle(hilo):
             // No termina el hilo, solo libera la referencia al mismo.
             // El hilo continúa ejecutándose normalmente.
@@ -460,8 +431,6 @@ DWORD WINAPI bucle_aceptar_solicitudes(LPVOID arg){
             // interactuar con el hilo.
         CloseHandle(hilo);
     }
-
-
 }
 
 void process_game_tick() {
@@ -470,7 +439,6 @@ void process_game_tick() {
     MensajeRecibido msg;
     char buffer[256];
 
-
     while(queue_dequeue(&colaMensajes, &msg)){
 
         printf("-\n");
@@ -478,10 +446,8 @@ void process_game_tick() {
         printHora(buffer);
         // recorremos el array de entidades y actualizamos la direccion de las entidades
         
-        
         Entidad *ent = getArrayEntidadesConMutex(&arrayEntidadesJugadores, msg.client_id); // >>> ESTO NO GARANTIZA LA EXCLUSION MUTUA. Puedo 
         // usar entidad despues de haber liberado el mutex porque tengo un puntero.
-
 
         if(ent != NULL){
             ent->dir = msg.dir_nueva;
@@ -496,7 +462,6 @@ void process_game_tick() {
             ent->pos.x += ent->dir.x;
             ent->pos.y += ent->dir.y;
         }
-
     }
 
     SetEvent(eventoEnviarActualizacion);
@@ -546,8 +511,6 @@ int queue_dequeue(ThreadSafeQueue* q, MensajeRecibido* out_msg) {
     return 1;
 }
 
-
-
 void queue_destroy(ThreadSafeQueue* q) {
     // Primero, vaciar la cola y liberar todos los nodos
     Node* current = q->head;
@@ -560,9 +523,4 @@ void queue_destroy(ThreadSafeQueue* q) {
     q->head = q->tail = NULL;
 
     DeleteCriticalSection(&q->mutex);
-
 }
-
-
-
-
