@@ -58,60 +58,64 @@ int main(){
     int bytes_recibidos;
     Entidad entidades_recibidas[100];
     int num_entidades = 0;
+    int player_id = -1;
+
+
+    int mensaje = UNIRSE_A_PARTIDA;
+    if(send(cliente_sock, (char*)&mensaje, sizeof(mensaje), 0) == SOCKET_ERROR){
+        printHora("Error en send de UNIRSE_A_PARTIDA");
+        closesocket(cliente_sock);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    } else {
+        printHora("Unirse a partida enviado");
+    }
+
+
+   // Esperamos a recibir el ID asignado por el servidor
+    bytes_recibidos = recv(cliente_sock, (char*)&player_id, sizeof(player_id), 0);
+    if (bytes_recibidos > 0) {
+        char debug_msg[256];
+        sprintf(debug_msg, "ID de jugador recibido: %d", player_id);
+        printHora(debug_msg);
+    } else if (bytes_recibidos == 0) {
+        printHora("Servidor desconectado al intentar recibir ID");
+        closesocket(cliente_sock);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    } else {
+        printHora("Error en recv al intentar recibir ID");
+        closesocket(cliente_sock);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    }
+
+
+
+
+
+
+
 
     while(!debe_cerrar_ventana()){
 
-        actualizar_dibujo(entidades_recibidas, num_entidades);
+       Vector2D vec = actualizar_dibujo(entidades_recibidas, num_entidades, player_id);
         
-        printf("> ");
-        fgets(buffer, sizeof(buffer), stdin);
-
-        buffer[strcspn(buffer, "\n")] = '\0';
-
-        if (strcmp(buffer, "") == 0) {
-            continue;
-        }
-
-        if (strcmp(buffer, "0") == 0) {
-            // Enviamos solicitud para unirnos a la partida
-            int mensaje = UNIRSE_A_PARTIDA;
-            if(send(cliente_sock, (char*)&mensaje, sizeof(mensaje), 0) == SOCKET_ERROR){
-            printHora("Error en send");
-            break;
-            } else {
-                printHora("Unirse a partida enviado");
-                
-                if(recv(cliente_sock, (char*)&miEntidad, sizeof(miEntidad), 0) == SOCKET_ERROR) {
-                    printHora("Error en recv");
-                    break;
-                } else {
-                    printHora("Entidad recibida. ID: %d", miEntidad.id);
-                }
-            }
-            continue;
-        }
-
-        // Salir si el usuario escribe 'salir'
-        if (strcmp(buffer, "salir") == 0) {
-            printHora("Desconectando...");
-            break;
-        }
+       printf("Enviando Vector: %f, %f\n", vec.x, vec.y);
 
 
-        Vector2D vec = {1.23f, 4.56f};
-        // vec.x = htonf(vec.x);
-        // vec.y = htonf(vec.y);
-        printf("Vector: %f, %f\n", vec.x, vec.y);
-
-        // envia sus coordenadas
+        // envia sus coordenadas (now sending direction vector)
         if(send(cliente_sock, (char*)&vec, sizeof(vec), 0) == SOCKET_ERROR){
             printHora("Error en send");
             break;
         }
 
-
         // Espera a recibir la actualizacion del estado del mundo
         bytes_recibidos = recv(cliente_sock, (char*)entidades_recibidas, 100 * sizeof(Entidad), 0);
+
 
 
         if(bytes_recibidos > 0 ){

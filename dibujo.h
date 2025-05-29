@@ -7,7 +7,7 @@
 void inicializar_dibujo();
 
 // Actualizar y dibujar el juego
-void actualizar_dibujo(Entidad* entidades, int num_entidades);
+Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id);
 
 // Verificar si la ventana debe cerrarse
 int debe_cerrar_ventana();

@@ -1,3 +1,249 @@
+====== C:\Users\ISM\Desktop\CURSOS 24-25 Semestre 2\Protocolos de Comunicaci¢n\aprendiendo\cliente.c ======
+#include <stdio.h>
+#include <winsock2.h>
+#include "mensajes.h"
+#include "dibujo.h"
+
+#pragma comment(lib, "ws2_32.lib")
+
+
+Entidad miEntidad;
+void printHora(char *mensaje) {
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    printf("[%02d:%02d:%02d.%03d - %d] %s\n",
+        st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, GetCurrentThreadId(), mensaje);
+}
+
+int main(){
+
+    inicializar_dibujo();
+
+    WSADATA wsa;
+
+    if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
+        printHora("Error inicializando Winsock");
+        cerrar_dibujo();
+        return 1;
+    }
+
+    SOCKET cliente_sock;
+
+    
+    cliente_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (cliente_sock == INVALID_SOCKET) {
+        printHora("Error creando el socket cliente");
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    }
+
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(8080);
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+
+
+    if(connect(cliente_sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR){
+        printHora("Error en connect");
+        closesocket(cliente_sock);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    }
+
+    printHora("Conectado al servidor");
+
+    char buffer[1024];
+    int bytes_recibidos;
+    Entidad entidades_recibidas[100];
+    int num_entidades = 0;
+    int player_id = -1;
+
+
+    int mensaje = UNIRSE_A_PARTIDA;
+    if(send(cliente_sock, (char*)&mensaje, sizeof(mensaje), 0) == SOCKET_ERROR){
+        printHora("Error en send de UNIRSE_A_PARTIDA");
+        closesocket(cliente_sock);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    } else {
+        printHora("Unirse a partida enviado");
+    }
+
+
+   // Esperamos a recibir el ID asignado por el servidor
+    bytes_recibidos = recv(cliente_sock, (char*)&player_id, sizeof(player_id), 0);
+    if (bytes_recibidos > 0) {
+        char debug_msg[256];
+        sprintf(debug_msg, "ID de jugador recibido: %d", player_id);
+        printHora(debug_msg);
+    } else if (bytes_recibidos == 0) {
+        printHora("Servidor desconectado al intentar recibir ID");
+        closesocket(cliente_sock);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    } else {
+        printHora("Error en recv al intentar recibir ID");
+        closesocket(cliente_sock);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    }
+
+
+
+
+
+
+
+
+    while(!debe_cerrar_ventana()){
+
+       Vector2D vec = actualizar_dibujo(entidades_recibidas, num_entidades, player_id);
+        
+       printf("Enviando Vector: %f, %f\n", vec.x, vec.y);
+
+
+        // envia sus coordenadas (now sending direction vector)
+        if(send(cliente_sock, (char*)&vec, sizeof(vec), 0) == SOCKET_ERROR){
+            printHora("Error en send");
+            break;
+        }
+
+        // Espera a recibir la actualizacion del estado del mundo
+        bytes_recibidos = recv(cliente_sock, (char*)entidades_recibidas, 100 * sizeof(Entidad), 0);
+
+
+
+        if(bytes_recibidos > 0 ){
+            num_entidades  = bytes_recibidos / sizeof(Entidad); // Calculate actual count
+            // imprimimos el estado del mundo
+            for(int i = 0; i < num_entidades; i++){
+                if(entidades_recibidas[i].id == 0) continue;;
+                char buffer2[1024];
+                sprintf(buffer2, "Entidad %d: %f, %f", entidades_recibidas[i].id, entidades_recibidas[i].pos.x, entidades_recibidas[i].pos.y);
+                printHora(buffer2);
+            }
+        } else if (bytes_recibidos == 0){
+            printHora("Servidor desconectado");
+            break;
+        } else {
+            printHora("Error en recv");
+            break;
+        }
+
+    }
+
+    printHora("Desconectado");
+    closesocket(cliente_sock);
+    WSACleanup();
+    cerrar_dibujo();
+
+    return 0;
+}=================
+====== C:\Users\ISM\Desktop\CURSOS 24-25 Semestre 2\Protocolos de Comunicaci¢n\aprendiendo\dibujo.c ======
+#include "dibujo.h"
+#include "include/raylib.h"
+#include <stdio.h>
+#include <math.h>
+
+static const int screenWidth = 800;
+static const int screenHeight = 600;
+
+void inicializar_dibujo() {
+    InitWindow(screenWidth, screenHeight, "Cliente de Juego");
+    SetTargetFPS(60);
+}
+
+Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id) {
+    BeginDrawing();
+    ClearBackground(RAYWHITE);
+
+
+    // --- posicion del mouse ---
+    Vector2D direction_vector = {0.0f, 0.0f}; // Default: no movement
+    Vector2 mouse_pos = GetMousePosition();
+    Vector2 screen_center = { (float)GetScreenWidth() / 2.0f, (float)GetScreenHeight() / 2.0f };
+
+
+    // Direccion desde el centro al mause
+    direction_vector.x = mouse_pos.x - screen_center.x;
+    direction_vector.y = mouse_pos.y - screen_center.y;
+
+    // normalizamos el vector
+    float magnitude = sqrt(direction_vector.x * direction_vector.x + direction_vector.y * direction_vector.y);
+    if (magnitude > 0) {
+        direction_vector.x /= magnitude;
+        direction_vector.y /= magnitude;
+    }
+
+
+    // Buscamos la entidad del jugador para centrar la vista
+    Vector2D player_pos = {0.0f, 0.0f}; // Por defecto en 0,0 si no encuentra jugador
+    int player_found = 0;
+    for(int i = 0; i < num_entidades; i++) {
+        if(entidades[i].id == player_id) {
+            player_pos = entidades[i].pos;
+            player_found = 1;
+            break;
+        }
+    }
+
+
+    // Encontrar el offset de la cÃ¡mara para centrarlo en player_pos
+    // El origen del mundo 0,0 deberÃ­a mapearse al centro de la pantalla cuando el jugador se encuentra en 0,0
+    float offsetX = screenWidth / 2.0f - (player_pos.x * 100); // Scale by 100 for world units
+    float offsetY = screenHeight / 2.0f - (player_pos.y * 100); // Scale by 100 for world units
+
+
+    // Dibujar tÃ­tulo
+    DrawText("Estado del Mundo", 20, 20, 20, BLACK);
+
+    
+    // Dibujar cada entidad
+    for(int i = 0; i < num_entidades; i++) {
+        if(entidades[i].id == 0) continue; // Skip if ID is 0
+
+        // Convert world coordinates to screen coordinates with camera offset
+        int x = (int)(entidades[i].pos.x * 100 + offsetX);
+        int y = (int)(entidades[i].pos.y * 100 + offsetY);
+        
+        // Draw entities only if they are within or near screen bounds
+        if(x >= -50 && x < screenWidth + 50 && y >= -50 && y < screenHeight + 50) { // Add some padding for visibility
+            // Draw the entity as a circle, change color for player
+            Color entity_color = (entidades[i].id == player_id) ? BLUE : RED;
+            DrawCircle(x, y, 10, entity_color);
+            
+            // Dibujar el ID de la entidad
+            char id_text[32];
+            sprintf(id_text, "%d", entidades[i].id);
+            DrawText(id_text, x - MeasureText(id_text, 16)/2, y - 25, 16, BLACK); // Center text above circle
+        }
+    }
+    
+    // Mostrar instrucciones
+    DrawText("Mueve el raton para controlar tu celula", 20, screenHeight - 40, 16, DARKGRAY);
+    DrawText("Tu ID: ", screenWidth - 150, 20, 20, BLACK);
+    DrawText(TextFormat("%d", player_id), screenWidth - 70, 20, 20, BLUE);
+
+    EndDrawing();
+
+    return direction_vector;
+}
+
+int debe_cerrar_ventana() {
+    return WindowShouldClose();
+}
+
+void cerrar_dibujo() {
+    CloseWindow();
+}
+=================
+====== C:\Users\ISM\Desktop\CURSOS 24-25 Semestre 2\Protocolos de Comunicaci¢n\aprendiendo\servidor.c ======
 #include <stdio.h>
 #include <winsock2.h>
 #pragma comment(lib, "ws2_32.lib")
@@ -566,3 +812,4 @@ void queue_destroy(ThreadSafeQueue* q) {
 
 
 
+=================
