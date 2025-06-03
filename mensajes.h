@@ -24,11 +24,14 @@ typedef enum {
 
 
 typedef struct {
-    int id;           // Identificador único de la entidad
-    TipoEntidad tipo; // Tipo de entidad (p.ej. 0: jugador, 1: comida, 2: virus, etc.)
+    int id;            // Identificador único de la entidad
+    TipoEntidad tipo;  // Tipo de entidad (p.ej. 0: jugador, 1: comida, 2: virus, etc.)
     Vector2D pos;      // Coordenadas de la entidad
     Vector2D dir;      // Dirección de movimiento de la entidad
+    float tamanio;     // Tamaño de la entidad (radio)
 } Entidad;
+
+
 
 #define UNIRSE_A_PARTIDA 1
 
