@@ -1,0 +1,47 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        // Esta es la configuración individual para el servidor que ya tenías
+        {
+            "name": "Depurar Servidor (GDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/servidor.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": true,
+            // "console": "integratedTerminal",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:\\ProgramData\\mingw64\\mingw64\\bin\\gdb.exe", // <-- ¡Recuerda ajustar esta ruta!
+            "preLaunchTask": "Compilar Servidor (GCC)"
+        },
+        // Esta es la configuración individual para el cliente que ya tenías
+        {
+            "name": "Depurar Cliente (GDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/cliente.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": true,
+            // "console": "integratedTerminal",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:\\ProgramData\\mingw64\\mingw64\\bin\\gdb.exe", // <-- ¡Recuerda ajustar esta ruta!
+            "preLaunchTask": "Compilar Cliente (GCC)"
+        }
+    ],
+    // ---- NUEVA SECCIÓN AÑADIDA ----
+    "compounds": [
+        {
+            "name": "Depurar Servidor y Cliente",
+            "configurations": [
+                "Depurar Servidor (GDB)",
+                "Depurar Cliente (GDB)"
+            ]
+        }
+    ]
+}
