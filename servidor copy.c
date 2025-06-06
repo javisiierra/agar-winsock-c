@@ -444,123 +444,68 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr) {
 
 }
 
-
 void process_game_tick()
 {
+    // Aquí va la lógica del juego a ejecutar en cada tick
     printHora("Inicio TICK");
     MensajeRecibido msg;
     char buffer[256];
 
-    // 1. Procesamos todos los mensajes recibidos y actualizamos posiciones
+    //1. Procesamos todos los mensajes recibidos
+    //1. Actualizamos el estado del mundo
     while (queue_dequeue(&colaMensajes, &msg))
     {
+
+        printf("-\n");
         sprintf(buffer, "Cliente %d envia el vector: %f, %f", msg.idCliente, msg.dir_nueva.x, msg.dir_nueva.y);
         printHora(buffer);
+        // recorremos el array de entidades y actualizamos la direccion de las entidades
 
-        // Tomar lock de jugadores para actualizar su dirección/pos
-        EnterCriticalSection(&arrayEntidadesJugadores.mutex);
-        Entidad *ent = getArrayEntidadesConMutex(&arrayEntidadesJugadores, msg.idCliente);
-        if (ent)
+        Entidad *ent = getArrayEntidadesConMutex(&arrayEntidadesJugadores, msg.idCliente); // >>> ESTO NO GARANTIZA LA EXCLUSION MUTUA. Puedo
+        // usar entidad despues de haber liberado el mutex porque tengo un puntero.
+
+        if (ent != NULL)
         {
+            // printHora("Movimiento de entidad restringido a los límites del mapa.");
             ent->dir = msg.dir_nueva;
-            float nx = ent->pos.x + ent->dir.x;
-            float ny = ent->pos.y + ent->dir.y;
-            if (nx >= -MAP_LIMIT_X && nx <= MAP_LIMIT_X) ent->pos.x = nx;
-            if (ny >= -MAP_LIMIT_Y && ny <= MAP_LIMIT_Y) ent->pos.y = ny;
+            float nueva_pos_x = ent->pos.x + ent->dir.x;
+            float nueva_pos_y = ent->pos.y + ent->dir.y;
+
+            if (nueva_pos_x <= (float)MAP_LIMIT_X && nueva_pos_x >= (float)-MAP_LIMIT_X) { ent->pos.x = nueva_pos_x; }
+            if (nueva_pos_y <= (float)MAP_LIMIT_Y && nueva_pos_y >= (float)-MAP_LIMIT_Y)  {  ent->pos.y = nueva_pos_y; }
+
+
         }
         else
         {
             sprintf(buffer, "No se ha encontrado la entidad con id %d", msg.idCliente);
             printHora(buffer);
         }
-        LeaveCriticalSection(&arrayEntidadesJugadores.mutex);
     }
 
-    // 2. Colisiones
+    //2. Enviamos el estado del juego a los clientes
+    PaqueteEstadoJuego paqueteEstadoJuego;
+    paqueteEstadoJuego.cabecera.numero_secuencia = 0;
+    paqueteEstadoJuego.cabecera.tipoPaquete = PACKET_TYPE_ESTADO_JUEGO;
+    
+    int totalEntidades = arrayEntidadesJugadores.num_entidades + arrayEntidadesAlimentos.num_entidades;
+    paqueteEstadoJuego.num_entidades = totalEntidades;
 
-    // Bloqueamos ambos arrays durante la fase de colisiones
-    EnterCriticalSection(&arrayEntidadesJugadores.mutex);
-    EnterCriticalSection(&arrayEntidadesAlimentos.mutex);
-
-    // 2.1 Jugador come comida
-    for (int i = 0; i < arrayEntidadesJugadores.num_entidades; i++)
-    {
-        Entidad *jug = &arrayEntidadesJugadores.entidades[i];
-        for (int j = 0; j < arrayEntidadesAlimentos.num_entidades; j++)
-        {
-            Entidad *food = &arrayEntidadesAlimentos.entidades[j];
-            float dx = jug->pos.x - food->pos.x;
-            float dy = jug->pos.y - food->pos.y;
-            float dist2 = dx*dx + dy*dy;
-            float radSum = (jug->tam + food->tam) * 10.0f / 100.0f; 
-            // asumiendo tam se multiplica por 10 en píxeles y pos son unidades
-            if (dist2 <= radSum*radSum)
-            {
-                // El jugador come la comida
-                jug->tam += food->tam;
-                respawnAlimentoEnIndice(&arrayEntidadesAlimentos, j);
-            }
-        }
-    }
-
-    // 2.2 Jugador vs Jugador
-    for (int i = 0; i < arrayEntidadesJugadores.num_entidades; i++)
-    {
-        Entidad *a = &arrayEntidadesJugadores.entidades[i];
-        for (int k = i + 1; k < arrayEntidadesJugadores.num_entidades; k++)
-        {
-            Entidad *b = &arrayEntidadesJugadores.entidades[k];
-            float dx = a->pos.x - b->pos.x;
-            float dy = a->pos.y - b->pos.y;
-            float dist2 = dx*dx + dy*dy;
-            float radSum = (a->tam + b->tam) * 10.0f / 100.0f;
-            if (dist2 <= radSum*radSum)
-            {
-                if (a->tam > b->tam)
-                {
-                    a->tam += b->tam;
-                    b->tam = 1;
-                    b->pos.x = 0; b->pos.y = 0;
-                }
-                else if (b->tam > a->tam)
-                {
-                    b->tam += a->tam;
-                    a->tam = 1;
-                    a->pos.x = 0; a->pos.y = 0;
-                }
-                // si iguales, no pasa nada
-            }
-        }
-    }
-
-    LeaveCriticalSection(&arrayEntidadesAlimentos.mutex);
-    LeaveCriticalSection(&arrayEntidadesJugadores.mutex);
-
-    // 3. Enviamos el estado del juego a los clientes
-    PaqueteEstadoJuego paquete;
-    paquete.cabecera.numero_secuencia = 0;
-    paquete.cabecera.tipoPaquete = PACKET_TYPE_ESTADO_JUEGO;
-    int total = arrayEntidadesJugadores.num_entidades + arrayEntidadesAlimentos.num_entidades;
-    paquete.num_entidades = total;
-
-    memcpy(paquete.entidades,
-           arrayEntidadesJugadores.entidades,
+    
+    memcpy(paqueteEstadoJuego.entidades, 
+           arrayEntidadesJugadores.entidades, 
            sizeof(Entidad) * arrayEntidadesJugadores.num_entidades);
-    memcpy(paquete.entidades + arrayEntidadesJugadores.num_entidades,
+    memcpy(paqueteEstadoJuego.entidades + arrayEntidadesJugadores.num_entidades,
            arrayEntidadesAlimentos.entidades,
-           sizeof(Entidad) * arrayEntidadesAlimentos.num_entidades);
+           sizeof(Entidad) * arrayEntidadesAlimentos.num_entidades);             
 
-    for (uint32_t i = 0; i < arrayClientes.numero_clientes; i++)
-    {
+
+    for(uint32_t i = 0; i < arrayClientes.numero_clientes; i++){
         printHora("Enviando el estado del juego a un cliente.");
-        Cliente_info ci = arrayClientes.clientes[i];
-        sendto(socket_servidor,
-               (char*)&paquete,
-               sizeof(paquete),
-               0,
-               (struct sockaddr *)&ci.direccion,
-               sizeof(ci.direccion));
+        Cliente_info clienteI = arrayClientes.clientes[i];
+        sendto(socket_servidor, (char*)&paqueteEstadoJuego, sizeof(paqueteEstadoJuego), 0, (struct sockaddr *)&clienteI.direccion, sizeof(clienteI.direccion));
     }
+
 
     printHora("Fin TICK");
 }

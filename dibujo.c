@@ -129,20 +129,36 @@ Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id)
         if(entidades[i].id == 0) continue; // Skip if ID is 0
 
         // Convert world coordinates to screen coordinates with camera offset
-        int x = (int)(entidades[i].pos.x * 100 + offsetX);
-        int y = (int)(entidades[i].pos.y * 100 + offsetY);
-        
-        // Draw entities only if they are within or near screen bounds
-        if(x >= -50 && x < screenWidth + 50 && y >= -50 && y < screenHeight + 50) {
-            // Draw the entity as a circle, change color for player
-            Color entity_color = (entidades[i].id == player_id) ? BLUE : RED;
-            DrawCircle(x, y, 10, entity_color);
+
+        if(entidades[i].tipo == ENTIDAD_JUGADOR) {
+            int x = (int)(entidades[i].pos.x * 100 + offsetX);
+            int y = (int)(entidades[i].pos.y * 100 + offsetY);
             
-            // Dibujar el ID de la entidad
-            char id_text[32];
-            sprintf(id_text, "%d", entidades[i].id);
-            DrawText(id_text, x - MeasureText(id_text, 16)/2, y - 25, 16, BLACK);
+            // Draw entities only if they are within or near screen bounds
+            if(x >= -50 && x < screenWidth + 50 && y >= -50 && y < screenHeight + 50) {
+                // Draw the entity as a circle, change color for player
+                Color entity_color = (entidades[i].id == player_id) ? BLUE : RED;
+                DrawCircle(x, y, entidades[i].tam*10, entity_color);
+                
+                // Dibujar el ID de la entidad
+                char id_text[32];
+                sprintf(id_text, "%d", entidades[i].id);
+                DrawText(id_text, x - MeasureText(id_text, 16)/2, y - 25, 16, BLACK);
+            }
+        } else if(entidades[i].tipo == ENTIDAD_COMIDA) {
+            int x = (int)(entidades[i].pos.x * 100 + offsetX);
+            int y = (int)(entidades[i].pos.y * 100 + offsetY);
+            
+            // Draw entities only if they are within or near screen bounds
+            if(x >= -50 && x < screenWidth + 50 && y >= -50 && y < screenHeight + 50) {
+                // Draw the entity as a circle, change color for player
+                Color entity_color = GREEN;
+                DrawCircle(x, y, entidades[i].tam*10, entity_color);
+            }
+            
         }
+
+
     }
     
     // Mostrar instrucciones

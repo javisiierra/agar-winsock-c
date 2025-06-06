@@ -30,7 +30,7 @@ void printHora(char *mensaje) {
 int main(){
 
     srand((unsigned int)time(NULL));
-    int bit = rand() % 2;
+    int bit = 0;
 
 
     inicializar_dibujo();
@@ -74,7 +74,7 @@ int main(){
 
 
     EstadoCliente estadoCliente = CLIENTE_SOLICITANDO_CONEXION;
-    Entidad entidades_mundo[MAX_ENTIDADES];
+    Entidad entidades_mundo[MAX_ENTIDADES*2];
     uint32_t numEntidadesActualesMundo = 0;
     uint32_t idCliente = 0;
     uint32_t contadorSecuencia = 0;

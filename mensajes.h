@@ -4,8 +4,11 @@
 #include <stdint.h>
 
 
-#define MAX_ENTIDADES 15
+#define MAX_ENTIDADES 10
 #define MAX_CLIENTES 10
+
+#define MAP_LIMIT_X 15
+#define MAP_LIMIT_Y 15
 
 #define TAM_MTU 1500
 #define TICK_RATE 60                       // ticks por segundo
@@ -39,6 +42,7 @@ typedef struct {
     TipoEntidad tipo; // Tipo de entidad (p.ej. 0: jugador, 1: comida, 2: virus, etc.)
     Vector2D pos;      // Coordenadas de la entidad
     Vector2D dir;      // Dirección de movimiento de la entidad
+    uint16_t tam;      // Tamaño de la entidad
 } Entidad;
 
 
@@ -77,7 +81,7 @@ typedef struct {
 typedef struct { 
     CabeceraRUDP cabecera;    // cabecera del paquede de que se va a enviar a los clientes
     uint16_t num_entidades; // total de entidades que se van a enviar
-    Entidad entidades[MAX_ENTIDADES]; // Todas las entidades que enviara el servidor a los clientes.
+    Entidad entidades[MAX_ENTIDADES*2]; // Todas las entidades que enviara el servidor a los clientes.
 } PaqueteEstadoJuego;
 
 typedef struct {
