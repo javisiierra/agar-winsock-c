@@ -3,7 +3,6 @@
 #pragma comment(lib, "ws2_32.lib")
 #include "mensajes.h"
 #include <time.h>
-#include "cola_generica.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -30,6 +29,8 @@ typedef struct
     uint32_t idCliente;
     struct sockaddr_in direccion;
     uint32_t ultima_secuencia_recibida;
+    uint32_t esperando_secuencia;
+    TipoPaquete ultimo_paquete_recibido;
 } Cliente_info;
 
 typedef struct {
@@ -105,7 +106,7 @@ typedef struct { // una vez recibamos un paquete PACKET_TYPE_UNIRSE o PACKET_TYP
     TipoPaquete tipoPaquete; // Aqui pondremos o PACKET_TYPE_UNIRSE o PACKET_TYPE_DESCONECTAR
 } PaquetesPendientesAck;
 
-ColaGenerica cola_paquetes_pendientes_ack;
+
 
 
 
@@ -174,7 +175,6 @@ int main()
 
     WSADATA wsa;
     inicializarArrayEntidadesConMutex(&arrayEntidadesJugadores);
-    cola_inicializar(&cola_paquetes_pendientes_ack);
     // inicializarArrayEntidadesConMutex(&arrayEntidadesComidas);
 
 
@@ -281,6 +281,7 @@ int addCliente_info(ArrayCliente_info* array, uint32_t idCliente, struct sockadd
     array->clientes[array->numero_clientes].direccion = direccion;
     array->clientes[array->numero_clientes].ultima_secuencia_recibida = secuencia;
     array->numero_clientes++;
+
     return 0;
 }
 
@@ -316,6 +317,18 @@ void deleteCliente_info(ArrayCliente_info* array, uint32_t idCliente) {
 
 }
 
+int getCliente_infoIndex(ArrayCliente_info* array, uint32_t idCliente) {
+    for (int i = 0; i < array->numero_clientes; i++) {
+        if (array->clientes[i].idCliente == idCliente) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+
+
+
 ArrayCliente_info arrayClientes = {1,0};
 
 void recibir_mensaje(SOCKET* socket_servidor_ptr) {
@@ -342,29 +355,27 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr) {
         case PACKET_TYPE_UNIRSE:
             printHora("Solicitud de unirse recibida.");
             CabeceraRUDP cabeceraRespuesta;
-            cabeceraRespuesta.numero_secuencia = cabecera.numero_secuencia +1 ;
+            cabeceraRespuesta.numero_secuencia = cabecera.numero_secuencia + 1; // deberia ser un 2
 
             if(arrayClientes.numero_clientes >= MAX_CLIENTES){
                 // rechazamos la solicitud
-                 cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_RECHAZADO;
+                cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_RECHAZADO;
                 PaqueteUnirseRechazado paqueteUnirseRechazado = {cabeceraRespuesta};
 
                 // le envio al cliente su mensaje
                 sendto(socket_servidor, (char *) &paqueteUnirseRechazado, sizeof(paqueteUnirseRechazado), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
             } else {
             
-            cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_OK;
-            uint32_t idCliente = arrayClientes.contadorID++;
-            addCliente_info(&arrayClientes, idCliente, direccion_cliente, cabecera.numero_secuencia);
-            Entidad nuevaEntidadJugador = {idCliente, ENTIDAD_JUGADOR, {0, 0}, {0, 0}};
-            addArrayEntidadesConMutex(&arrayEntidadesJugadores, nuevaEntidadJugador);
-            PaqueteUnirseAceptado paqueteUnirseAceptado = {cabeceraRespuesta, idCliente};
-            // le envio al cliente su mensaje
-            sendto(socket_servidor,(char *) &paqueteUnirseAceptado, sizeof(paqueteUnirseAceptado), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
+                cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_OK;
+                uint32_t idCliente = arrayClientes.contadorID++;
+                addCliente_info(&arrayClientes, idCliente, direccion_cliente, cabecera.numero_secuencia);
+                Entidad nuevaEntidadJugador = {idCliente, ENTIDAD_JUGADOR, {0, 0}, {0, 0}};
+                addArrayEntidadesConMutex(&arrayEntidadesJugadores, nuevaEntidadJugador);
+                PaqueteUnirseAceptado paqueteUnirseAceptado = {cabeceraRespuesta, idCliente};
+                // le envio al cliente su mensaje
+                sendto(socket_servidor,(char *) &paqueteUnirseAceptado, sizeof(paqueteUnirseAceptado), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
 
             }
-
-            
             break;
         case PACKET_TYPE_UNIDO_OK:
             break;
@@ -389,22 +400,45 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr) {
         case PACKET_TYPE_ESTADO_JUEGO:
             break;
         case PACKET_TYPE_ACK:
+
+
+
+
             break;
         case PACKET_TYPE_PING:
             break;
         case PACKET_TYPE_DESCONECTAR:
-            PaqueteDesconectar paqueteDesconectar;
-            memcpy(&paqueteDesconectar, buffer, sizeof(PaqueteDesconectar));
-            printHora("Solicitud de desconectar recibida.");
-            deleteCliente_info(&arrayClientes, paqueteDesconectar.id);
-            removeArrayEntidadesConMutex(&arrayEntidadesJugadores, paqueteDesconectar.id);
-            PaqueteDesconectarAck paqueteDesconectarAck;
-            paqueteDesconectarAck.cabecera.tipoPaquete = PACKET_TYPE_ACK;
-            paqueteDesconectarAck.cabecera.numero_secuencia = paqueteDesconectar.header.numero_secuencia + 1;
+            {
+                PaqueteDesconectar paqueteDesconectar;
+                memcpy(&paqueteDesconectar, buffer, sizeof(PaqueteDesconectar));
+                
 
+                printf("Solicitud de desconectar recibida para cliente ID: %d.", paqueteDesconectar.id);
+      
+                // 1. Busca si el cliente existe.
+                int cliente_index = getCliente_infoIndex(&arrayClientes, paqueteDesconectar.id);
 
-            sendto(socket_servidor, (char *) &paqueteDesconectarAck, sizeof(paqueteDesconectarAck), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
+                if (cliente_index != -1) {
+                    // ¡Cliente encontrado!  Lo borramos.
+                    printHora("Cliente encontrado. Eliminando sus datos...");
+                    deleteCliente_info(&arrayClientes, paqueteDesconectar.id); 
+                    removeArrayEntidadesConMutex(&arrayEntidadesJugadores, paqueteDesconectar.id);
+                } else {
+                    // El cliente no existe. Quizás es una petición duplicada y ya lo borramos.
+                    printHora("Cliente no encontrado en el array (puede ser una petición duplicada).");
+                }
+                
+                // 2. En cualquier caso (exista o no), enviamos un ACK de vuelta como cortesía.
+                //  Esto maneja tanto la primera petición como los reintentos del cliente.
+                PaqueteDesconectarAck paqueteDesconectarAck;
+                paqueteDesconectarAck.cabecera.tipoPaquete = PACKET_TYPE_DESCONECTAR_ACK;
+                paqueteDesconectarAck.cabecera.numero_secuencia = paqueteDesconectar.header.numero_secuencia + 1; // Hacemos eco de su secuencia
 
+                sendto(socket_servidor, (char *) &paqueteDesconectarAck, sizeof(paqueteDesconectarAck), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
+                
+                printf("DESCONECTAR_ACK enviado a la dirección de origen para ID: %d.", paqueteDesconectar.id);
+
+            }
             break;
     }
 

@@ -5,14 +5,17 @@
 #include <math.h>
 #include <stdbool.h>
 #include <time.h>
+#include <windows.h>
 
 #pragma comment(lib, "ws2_32.lib")
 
 typedef enum {
     CLIENTE_CONECTADO,
-    CLIENTE_DESCONECTADO,
-    CLIENTE_ESPERANDO_RESPUESTA
+    CLIENTE_SOLICITANDO_CONEXION, // de aqui partimos
+    CLIENTE_ESPERANDO_RESPUESTA,
+    CLIENTE_DESCONECTANDO  // HEMOS HECHO DESCONEXION
 } EstadoCliente;
+
 
 
 Entidad miEntidad;
@@ -70,10 +73,11 @@ int main(){
     printHora("Conectado al servidor");
 
 
-    EstadoCliente estadoCliente = CLIENTE_DESCONECTADO;
+    EstadoCliente estadoCliente = CLIENTE_SOLICITANDO_CONEXION;
     Entidad entidades_mundo[MAX_ENTIDADES];
     uint32_t numEntidadesActualesMundo = 0;
     uint32_t idCliente = 0;
+    uint32_t contadorSecuencia = 0;
     char buffer[TAM_MTU];
 
 
@@ -85,9 +89,20 @@ int main(){
     QueryPerformanceFrequency(&frecuencia);
     QueryPerformanceCounter(&tiempo_ultimo_tick_qpc); // Tiempo inicial del primer tick
 
-    int bytes_recibidos;
-    while(!debe_cerrar_ventana()){
 
+
+
+
+
+    int bytes_recibidos;
+    int running = 1;
+    int intentos_desconexion = 0;
+    int intentos_conexion = 0;
+    while(running == 1){
+
+        if( estadoCliente != CLIENTE_DESCONECTANDO  && debe_cerrar_ventana() ){
+            estadoCliente = CLIENTE_DESCONECTANDO ;
+        }
 
         switch(estadoCliente){
 
@@ -266,18 +281,24 @@ int main(){
 
                 break;
 
-            case CLIENTE_DESCONECTADO:
-                printHora("Esperamos que nos unamos al servidor...");
+            case CLIENTE_SOLICITANDO_CONEXION:
+                if(intentos_conexion >= 10) {
+                    running = 0;
+                    break;
+                }
+                printHora("Le enviamos una solicitud al servidor...");
                 PaqueteUnirse paqueteUnirse;
                 paqueteUnirse.header.numero_secuencia = 0;
                 paqueteUnirse.header.tipoPaquete = PACKET_TYPE_UNIRSE;
                 sendto(socket_cliente, (char *)&paqueteUnirse, sizeof(paqueteUnirse), 0, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor));
                 estadoCliente = CLIENTE_ESPERANDO_RESPUESTA;
+
+                intentos_desconexion++;
                 break;
             case CLIENTE_ESPERANDO_RESPUESTA:
+
                 int tam_direccion_servidor = sizeof(direccion_servidor);
                 bytes_recibidos = recvfrom(socket_cliente, (char *)buffer, TAM_MTU, 0, (struct sockaddr *)&direccion_servidor, &tam_direccion_servidor);
-
                 if(bytes_recibidos > 0){ // si hemos recibido algo...
                     CabeceraRUDP cabecera;
                     memcpy(&cabecera, buffer, sizeof(CabeceraRUDP));
@@ -286,56 +307,65 @@ int main(){
                         PaqueteUnirseAceptado paqueteUnirseAceptado;
                         memcpy(&paqueteUnirseAceptado, buffer, sizeof(PaqueteUnirseAceptado));
                         idCliente = paqueteUnirseAceptado.id;
-                        
                         estadoCliente = CLIENTE_CONECTADO;
                     } else if (cabecera.tipoPaquete == PACKET_TYPE_UNIDO_RECHAZADO){
                         PaqueteUnirseRechazado paqueteUnirseRechazado;
                         memcpy(&paqueteUnirseRechazado, buffer, sizeof(PaqueteUnirseRechazado));
-                        estadoCliente = CLIENTE_DESCONECTADO;
-                        idCliente = 0; // esto sobra, pero por si acaso.
+                        estadoCliente = CLIENTE_SOLICITANDO_CONEXION;
+                        printf("Servidor me ha rechazado:\n");
+                        running = 0;
                     } else {
                         printHora("Respuesta desconocida");
-                        estadoCliente = CLIENTE_DESCONECTADO;
+                        estadoCliente = CLIENTE_SOLICITANDO_CONEXION;
+                        Sleep(1000);
                     }
                     
                 }
+                
                 break;
+
+            case CLIENTE_DESCONECTANDO:
+            
+                if(intentos_desconexion > 10) {
+                    running = 0;
+                    break;
+                }
+                // 1. Escuchar por un ACK del servidor
+                bytes_recibidos = recvfrom(socket_cliente, buffer, TAM_MTU, 0, NULL, NULL);
+
+                    while (bytes_recibidos > 0) {
+                        //1. Compruebo que cabecera hemos recibido. ¡ Necesitamos = PACKET_TYPE_DESCONECTAR_ACK !
+                        CabeceraRUDP cabecera;
+                        memcpy(&cabecera, buffer, sizeof(CabeceraRUDP));
+                        if( cabecera.tipoPaquete == PACKET_TYPE_DESCONECTAR_ACK ){
+                            printHora("Desconectado");
+                            running = 0;
+                            break;
+                        } else {
+                            //2. Si la cabecera no es un PACKET_TYPE_DESCONECTAR_ACK, volvemos a leer de nuevo hasta que lo sea o este vacia.
+                            bytes_recibidos = recvfrom(socket_cliente, buffer, TAM_MTU, 0, NULL, NULL);
+                        }
+
+                    }
+                Sleep(1000);
+            
+                // 2. Reenviamos el paquete de desconectar
+                PaqueteDesconectar paqueteDesconectar;
+                paqueteDesconectar.header.numero_secuencia = contadorSecuencia; // Reenviamos con el mismo número
+                paqueteDesconectar.header.tipoPaquete = PACKET_TYPE_DESCONECTAR;
+                paqueteDesconectar.id = idCliente;
+
+                sendto(socket_cliente, (char *)&paqueteDesconectar, sizeof(paqueteDesconectar), 0, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor));
+                
+                printf("FInalizando intento de desconectar... (%d)\n", intentos_desconexion);
+                intentos_desconexion++;
+            break;    
+
+
+
+
         }
 
-    }
-
-    // Protocolo de cerrado de conexion.
-    PaqueteDesconectar paqueteDesconectar;
-    paqueteDesconectar.header.numero_secuencia = 0;
-    paqueteDesconectar.header.tipoPaquete = PACKET_TYPE_DESCONECTAR;
-    paqueteDesconectar.id = idCliente;
-    sendto(socket_cliente, (char *)&paqueteDesconectar, sizeof(paqueteDesconectar), 0, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor));
-
-    // Volvemos a activar el modo bloqueante para cerrar la sesion.
-    u_long blocking_mode = 0; 
-    if (ioctlsocket(socket_cliente, FIONBIO, &blocking_mode) == SOCKET_ERROR) {
-        printHora("Error al configurar el socket como bloqueante");
-        closesocket(socket_cliente);
-        WSACleanup();
-        cerrar_dibujo();
-        return 1;
-    }
-
-    int tam_direccion_servidor = sizeof(direccion_servidor);
-    int encontrado = -1;
-    while(encontrado == -1){
-        int bytes_recibidos = recvfrom(socket_cliente, (char *)buffer, TAM_MTU, 0, (struct sockaddr *)&direccion_servidor, &tam_direccion_servidor);
-
-        if(bytes_recibidos > 0){ // si hemos recibido algo...
-            PaqueteDesconectarAck paqueteDesconectarAck;
-            memcpy(&paqueteDesconectarAck, buffer, sizeof(paqueteDesconectarAck));
-            if(paqueteDesconectarAck.cabecera.tipoPaquete == PACKET_TYPE_ACK){
-                printHora("Desconectado");
-                encontrado = 1;
-            } else {
-                printHora("Respuesta desconocida");
-            }
-        }
     }
 
 

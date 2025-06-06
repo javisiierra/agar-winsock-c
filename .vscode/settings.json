@@ -32,6 +32,7 @@
         "locale": "c",
         "xlocmes": "c",
         "xlocnum": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "windows.h": "c"
     }
 }

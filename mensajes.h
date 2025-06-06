@@ -18,9 +18,10 @@ typedef enum {
     PACKET_TYPE_UNIDO_RECHAZADO,// Servidor -> Cliente
     PACKET_TYPE_MOVIMIENTO,     // Cliente -> Servidor
     PACKET_TYPE_ESTADO_JUEGO,   // Servidor -> Cliente
-    PACKET_TYPE_ACK,            // Bidireccional
+    PACKET_TYPE_ACK,            // Server -> Cliente
     PACKET_TYPE_PING,           // Bidireccional
-    PACKET_TYPE_DESCONECTAR     // Bidireccional
+    PACKET_TYPE_DESCONECTAR,     // Cliente -> Servidor
+    PACKET_TYPE_DESCONECTAR_ACK, // Bidireccional
 } TipoPaquete;
 
 typedef struct {
@@ -44,7 +45,7 @@ typedef struct {
 #pragma pack(push, 1) // Alineamos
 
 typedef struct {
-    uint32_t numero_secuencia; // numero de secuencia.
+    uint32_t numero_secuencia; // numero de secuencia. El 0 esta reservado y equivale a un -1.
     TipoPaquete tipoPaquete;         // tipo de paquete que se esta enviando.
 } CabeceraRUDP;
 
@@ -59,8 +60,12 @@ typedef struct {
 } PaqueteDesconectar;
 
 typedef struct {
-    CabeceraRUDP cabecera; // cabecera del paquete que se va a enviar a los clientes
+    CabeceraRUDP cabecera; // cabecera con la que el servidor informa al cliente que ha recibido su peticion de desconexion.
 } PaqueteDesconectarAck;
+
+// typedef struct {
+//     CabeceraRUDP cabecera; // con este paquete el cliente le informa al server que ha recibido su aceptacio, rechazo o desconexion.
+// } PaqueteAck;
 
 typedef struct {
     CabeceraRUDP header;  // cabecera del paquete que se va a recibir de los clientes
@@ -77,7 +82,7 @@ typedef struct {
 
 typedef struct {
     CabeceraRUDP header; // cabecera del paquete que se va a recibir de los clientes
-    uint32_t id;         // id del cliente que se va a desconectar
+    uint32_t id;         // id del cliente que se va a unir
 } PaqueteUnirseAceptado;
 
 typedef struct {
