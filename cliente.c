@@ -2,11 +2,21 @@
 #include <winsock2.h>
 #include "mensajes.h"
 #include "dibujo.h"
+#include <math.h>
+#include <stdbool.h>
+#include <time.h>
 
 #pragma comment(lib, "ws2_32.lib")
 
+typedef enum {
+    CLIENTE_CONECTADO,
+    CLIENTE_DESCONECTADO,
+    CLIENTE_ESPERANDO_RESPUESTA
+} EstadoCliente;
+
 
 Entidad miEntidad;
+
 void printHora(char *mensaje) {
     SYSTEMTIME st;
     GetSystemTime(&st);
@@ -16,129 +26,322 @@ void printHora(char *mensaje) {
 
 int main(){
 
+    srand((unsigned int)time(NULL));
+    int bit = rand() % 2;
+
+
     inicializar_dibujo();
 
     WSADATA wsa;
-
+    //1. Inicializamos Winsock
     if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
         printHora("Error inicializando Winsock");
         cerrar_dibujo();
         return 1;
     }
 
-    SOCKET cliente_sock;
-
-    
-    cliente_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (cliente_sock == INVALID_SOCKET) {
+    //2. Creamos el socket UDP
+    SOCKET socket_cliente = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (socket_cliente == INVALID_SOCKET) {
         printHora("Error creando el socket cliente");
         WSACleanup();
         cerrar_dibujo();
         return 1;
     }
 
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(8080);
-    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-
-
-    if(connect(cliente_sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR){
-        printHora("Error en connect");
-        closesocket(cliente_sock);
+    //2. Lo configuramos como no bloqueante
+    u_long non_blocking_mode = 1;
+    if (ioctlsocket(socket_cliente, FIONBIO, &non_blocking_mode) == SOCKET_ERROR) {
+        printHora("Error al configurar el socket cliente como no bloqueante");
+        closesocket(socket_cliente);
         WSACleanup();
         cerrar_dibujo();
         return 1;
     }
+    
+    //3. Escribimos la direccion del servidor
+    struct sockaddr_in direccion_servidor;
+    direccion_servidor.sin_family = AF_INET;
+    direccion_servidor.sin_port = htons(8080);
+    direccion_servidor.sin_addr.s_addr = inet_addr("127.0.0.1");
+    // direccion_servidor.sin_addr.s_addr = inet_addr("192.168.1.129");
+
 
     printHora("Conectado al servidor");
 
-    char buffer[1024];
+
+    EstadoCliente estadoCliente = CLIENTE_DESCONECTADO;
+    Entidad entidades_mundo[MAX_ENTIDADES];
+    uint32_t numEntidadesActualesMundo = 0;
+    uint32_t idCliente = 0;
+    char buffer[TAM_MTU];
+
+
+    // iniciamos la movida del tick
+
+    LARGE_INTEGER frecuencia;
+    LARGE_INTEGER tiempo_ultimo_tick_qpc, tiempo_actual_qpc;
+
+    QueryPerformanceFrequency(&frecuencia);
+    QueryPerformanceCounter(&tiempo_ultimo_tick_qpc); // Tiempo inicial del primer tick
+
     int bytes_recibidos;
-    Entidad entidades_recibidas[100];
-    int num_entidades = 0;
-    int player_id = -1;
-
-
-    int mensaje = UNIRSE_A_PARTIDA;
-    if(send(cliente_sock, (char*)&mensaje, sizeof(mensaje), 0) == SOCKET_ERROR){
-        printHora("Error en send de UNIRSE_A_PARTIDA");
-        closesocket(cliente_sock);
-        WSACleanup();
-        cerrar_dibujo();
-        return 1;
-    } else {
-        printHora("Unirse a partida enviado");
-    }
-
-
-   // Esperamos a recibir el ID asignado por el servidor
-    bytes_recibidos = recv(cliente_sock, (char*)&player_id, sizeof(player_id), 0);
-    if (bytes_recibidos > 0) {
-        char debug_msg[256];
-        sprintf(debug_msg, "ID de jugador recibido: %d", player_id);
-        printHora(debug_msg);
-    } else if (bytes_recibidos == 0) {
-        printHora("Servidor desconectado al intentar recibir ID");
-        closesocket(cliente_sock);
-        WSACleanup();
-        cerrar_dibujo();
-        return 1;
-    } else {
-        printHora("Error en recv al intentar recibir ID");
-        closesocket(cliente_sock);
-        WSACleanup();
-        cerrar_dibujo();
-        return 1;
-    }
-
-
-
-
-
-
-
-
     while(!debe_cerrar_ventana()){
 
-       Vector2D vec = actualizar_dibujo(entidades_recibidas, num_entidades, player_id);
-        
-       printf("Enviando Vector: %f, %f\n", vec.x, vec.y);
+
+        switch(estadoCliente){
+
+            case CLIENTE_CONECTADO: // EN CADA TICK ENVIAMOS UN MOVIMIENTO (A) Y RECIBIMOS EL ESTADO DEL MUNDO (B)
+
+                QueryPerformanceCounter(&tiempo_actual_qpc);
+
+                long long microsegundos_transcurridos_desde_ultimo_tick = (tiempo_actual_qpc.QuadPart - tiempo_ultimo_tick_qpc.QuadPart) * 1000000LL / frecuencia.QuadPart;
+                long long intervalo_objetivo_microsegundos = 1000000LL / TICK_RATE; // Intervalo deseado en microsegundos
+
+                if (microsegundos_transcurridos_desde_ultimo_tick >= intervalo_objetivo_microsegundos)
+                 {
+                    //A.1. Miramos si el servidor nos ha mandado algun estado del mundo
+                        // --- INICIO DE LA MODIFICACIÓN ---
+
+                        // Buffer para guardar temporalmente el último paquete de estado de juego válido que recibamos.
+                        char ultimoPaqueteBuffer[sizeof(PaqueteEstadoJuego)]; 
+                        bool seRecibioUnPaqueteValido = false;
+
+                        // Bucle para recibir todos los datagramas pendientes en la cola del socket.
+                        while (true) {
+                            char buffer[TAM_MTU]; // Buffer para la recepción de cada paquete individual
+                            int bytes_recibidos;
+                            int server_addr_len = sizeof(direccion_servidor);
+
+                            bytes_recibidos = recvfrom(socket_cliente, buffer, TAM_MTU, 0, (struct sockaddr *)&direccion_servidor, &server_addr_len);
+
+                            if (bytes_recibidos > 0) {
+                                // Recibimos un paquete. Verificamos si es un estado de juego válido.
+                                CabeceraRUDP* cabecera = (CabeceraRUDP*)buffer;
+
+                                if (cabecera->tipoPaquete == PACKET_TYPE_ESTADO_JUEGO && bytes_recibidos == sizeof(PaqueteEstadoJuego)) {
+                                    // Es un paquete de estado de juego válido. Guardamos su contenido.
+                                    // Si llegan más, este se sobrescribirá, lo cual es exactamente lo que queremos.
+                                    memcpy(ultimoPaqueteBuffer, buffer, sizeof(PaqueteEstadoJuego));
+                                    seRecibioUnPaqueteValido = true;
+                                }
+                                // Si no es un paquete de estado de juego, simplemente lo ignoramos y continuamos el bucle
+                                // para seguir vaciando la cola.
+
+                            } else if (bytes_recibidos == SOCKET_ERROR) {
+                                int error = WSAGetLastError();
+                                if (error == WSAEWOULDBLOCK) {
+                                    // ¡Esto es lo esperado! Significa que no hay más mensajes en la cola.
+                                    // Rompemos el bucle para proceder a procesar el último paquete que guardamos.
+                                    break; 
+                                } else {
+                                    // Ocurrió un error de red real.
+                                    // Puedes imprimirlo para depurar si es necesario.
+                                    // printf("recvfrom falló con error: %d\n", error);
+                                    break;
+                                }
+                            } else {
+                                // recvfrom devolvió 0 o un valor inesperado. La conexión podría estar cerrada.
+                                break;
+                            }
+                        }
+
+                        // Después del bucle, si hemos recibido al menos un paquete válido, procesamos el último.
+                        if (seRecibioUnPaqueteValido) {
+                            // Apuntamos al buffer donde guardamos el último paquete.
+                            PaqueteEstadoJuego* paqueteEstadoJuego = (PaqueteEstadoJuego*)ultimoPaqueteBuffer;
+                            
+                            // Actualizamos el estado del juego local con los datos del último paquete.
+                            numEntidadesActualesMundo = paqueteEstadoJuego->num_entidades;
+
+                            for (int i = 0; i < paqueteEstadoJuego->num_entidades; i++) {
+                                entidades_mundo[i] = paqueteEstadoJuego->entidades[i];
+                            }
+                            
+                            // Opcional: puedes poner un log para saber que se actualizó
+                            // printf("Estado del juego actualizado con el paquete más reciente.\n");
+                        }
+
+                        // --- FIN DE LA MODIFICACIÓN ---
 
 
-        // envia sus coordenadas (now sending direction vector)
-        if(send(cliente_sock, (char*)&vec, sizeof(vec), 0) == SOCKET_ERROR){
-            printHora("Error en send");
-            break;
-        }
-
-        // Espera a recibir la actualizacion del estado del mundo
-        bytes_recibidos = recv(cliente_sock, (char*)entidades_recibidas, 100 * sizeof(Entidad), 0);
+                    //B.1. Obtenemos el vector de direccion
+                    for(int i = 0; i < numEntidadesActualesMundo; i++){
+                        printf("Entidad %d: %f, %f\n", i, entidades_mundo[i].pos.x, entidades_mundo[i].pos.y);
+                    }
 
 
+                    Vector2D vec = actualizar_dibujo(entidades_mundo, numEntidadesActualesMundo, idCliente);
 
-        if(bytes_recibidos > 0 ){
-            num_entidades  = bytes_recibidos / sizeof(Entidad); // Calculate actual count
-            // imprimimos el estado del mundo
-            for(int i = 0; i < num_entidades; i++){
-                if(entidades_recibidas[i].id == 0) continue;;
-                char buffer2[1024];
-                sprintf(buffer2, "Entidad %d: %f, %f", entidades_recibidas[i].id, entidades_recibidas[i].pos.x, entidades_recibidas[i].pos.y);
-                printHora(buffer2);
-            }
-        } else if (bytes_recibidos == 0){
-            printHora("Servidor desconectado");
-            break;
-        } else {
-            printHora("Error en recv");
-            break;
+ // Solo para testear, vamos a generar un movimiento en circulos
+                    
+                    // --- INICIO DEL NUEVO CÓDIGO DE TESTEO ---
+                if(bit) {
+                    // 1. Definimos los parámetros de la "jaula" invisible
+                    const Vector2D PUNTO_CENTRAL = {0.0f, 0.0f}; // Centro del área de juego
+                    
+                    // ESTE ES EL VALOR CLAVE: el radio máximo.
+                    // Lo pongo en 50.0f para que el efecto sea visible.
+                    // ¡Cámbialo a 3.0f para cumplir tu requisito exacto!
+                    const float RADIO_MAXIMO = 2.0f; 
+
+                    // 2. Buscamos la posición actual de nuestro jugador
+                    Vector2D pos_actual = {0,0};
+                    bool entidad_encontrada = false;
+                    for (int i = 0; i < numEntidadesActualesMundo; i++) {
+                        if (entidades_mundo[i].id == idCliente) {
+                            pos_actual = entidades_mundo[i].pos;
+                            entidad_encontrada = true;
+                            break;
+                        }
+                    }
+
+                    if (entidad_encontrada) {
+                        // 3. Calculamos el vector desde el centro hasta nuestra posición actual
+                        Vector2D vector_desde_centro;
+                        vector_desde_centro.x = pos_actual.x - PUNTO_CENTRAL.x;
+                        vector_desde_centro.y = pos_actual.y - PUNTO_CENTRAL.y;
+
+                        // 4. Calculamos la distancia al centro
+                        float distancia_al_centro = sqrtf(vector_desde_centro.x * vector_desde_centro.x + vector_desde_centro.y * vector_desde_centro.y);
+
+                        // 5. LÓGICA PRINCIPAL: ¿Estamos fuera o dentro del radio máximo?
+                        if (distancia_al_centro > RADIO_MAXIMO) {
+                            // ESTAMOS FUERA: La única dirección posible es de vuelta al centro.
+                            // El vector hacia el centro es el inverso de `vector_desde_centro`.
+                            vec.x = -vector_desde_centro.x;
+                            vec.y = -vector_desde_centro.y;
+                            
+                        } else {
+                            // ESTAMOS DENTRO: Nos movemos en una dirección tangencial (perpendicular)
+                            // para que parezca que nos movemos por el interior.
+                            // Un vector perpendicular a (x, y) es (-y, x).
+                            vec.x = -vector_desde_centro.y;
+                            vec.y =  vector_desde_centro.x;
+                        }
+
+                        // 6. Normalizamos el vector final para que solo represente una dirección pura.
+                        // Esto es crucial para que el servidor aplique la velocidad correctamente.
+                        float magnitud = sqrtf(vec.x * vec.x + vec.y * vec.y);
+                        if (magnitud > 0.001f) { // Evitamos la división por cero si estamos justo en el centro
+                            vec.x /= magnitud;
+                            vec.y /= magnitud;
+                        } else {
+                            // Si estamos en el centro exacto, damos un empujón inicial para empezar a movernos.
+                            vec.x = 1.0f;
+                            vec.y = 0.0f;
+                        }
+                                // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+                                // 7. APLICAMOS EL MODIFICADOR DE VELOCIDAD (¡LA SOLUCIÓN!)
+                                // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+                                // Define qué tan lento quieres que vaya. 0.5f es la mitad de rápido.
+                                const float factor_velocidad = 0.1f; 
+
+                                // Multiplicamos el vector de dirección por nuestro factor.
+                                vec.x *= factor_velocidad;
+                                vec.y *= factor_velocidad;
+
+                    }
+
+                    
+                }
+                   // --- FIN DEL NUEVO CÓDIGO DE TESTEO ---
+
+
+                    //B.2. Enviamos el vector al servidor
+                    if(vec.x == 0 && vec.y == 0){ // Si no hay movimiento, no enviamos nada.
+                        break;
+                    }
+                    printf("Enviando Vector: %f, %f\n", vec.x, vec.y);
+                    PaqueteMovimiento paqueteMovimiento;
+                    paqueteMovimiento.header.numero_secuencia = 0;
+                    paqueteMovimiento.header.tipoPaquete = PACKET_TYPE_MOVIMIENTO;
+                    paqueteMovimiento.idCliente = idCliente;
+                    paqueteMovimiento.dir_nueva = vec;
+
+                    sendto(socket_cliente,  (char*) &paqueteMovimiento, sizeof(paqueteMovimiento), 0, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor));
+
+                    tiempo_ultimo_tick_qpc = tiempo_actual_qpc; // Actualiza el tiempo del ultimo tick
+                }
+
+                break;
+
+            case CLIENTE_DESCONECTADO:
+                printHora("Esperamos que nos unamos al servidor...");
+                PaqueteUnirse paqueteUnirse;
+                paqueteUnirse.header.numero_secuencia = 0;
+                paqueteUnirse.header.tipoPaquete = PACKET_TYPE_UNIRSE;
+                sendto(socket_cliente, (char *)&paqueteUnirse, sizeof(paqueteUnirse), 0, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor));
+                estadoCliente = CLIENTE_ESPERANDO_RESPUESTA;
+                break;
+            case CLIENTE_ESPERANDO_RESPUESTA:
+                int tam_direccion_servidor = sizeof(direccion_servidor);
+                bytes_recibidos = recvfrom(socket_cliente, (char *)buffer, TAM_MTU, 0, (struct sockaddr *)&direccion_servidor, &tam_direccion_servidor);
+
+                if(bytes_recibidos > 0){ // si hemos recibido algo...
+                    CabeceraRUDP cabecera;
+                    memcpy(&cabecera, buffer, sizeof(CabeceraRUDP));
+
+                    if(cabecera.tipoPaquete == PACKET_TYPE_UNIDO_OK){
+                        PaqueteUnirseAceptado paqueteUnirseAceptado;
+                        memcpy(&paqueteUnirseAceptado, buffer, sizeof(PaqueteUnirseAceptado));
+                        idCliente = paqueteUnirseAceptado.id;
+                        
+                        estadoCliente = CLIENTE_CONECTADO;
+                    } else if (cabecera.tipoPaquete == PACKET_TYPE_UNIDO_RECHAZADO){
+                        PaqueteUnirseRechazado paqueteUnirseRechazado;
+                        memcpy(&paqueteUnirseRechazado, buffer, sizeof(PaqueteUnirseRechazado));
+                        estadoCliente = CLIENTE_DESCONECTADO;
+                        idCliente = 0; // esto sobra, pero por si acaso.
+                    } else {
+                        printHora("Respuesta desconocida");
+                        estadoCliente = CLIENTE_DESCONECTADO;
+                    }
+                    
+                }
+                break;
         }
 
     }
 
+    // Protocolo de cerrado de conexion.
+    PaqueteDesconectar paqueteDesconectar;
+    paqueteDesconectar.header.numero_secuencia = 0;
+    paqueteDesconectar.header.tipoPaquete = PACKET_TYPE_DESCONECTAR;
+    paqueteDesconectar.id = idCliente;
+    sendto(socket_cliente, (char *)&paqueteDesconectar, sizeof(paqueteDesconectar), 0, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor));
+
+    // Volvemos a activar el modo bloqueante para cerrar la sesion.
+    u_long blocking_mode = 0; 
+    if (ioctlsocket(socket_cliente, FIONBIO, &blocking_mode) == SOCKET_ERROR) {
+        printHora("Error al configurar el socket como bloqueante");
+        closesocket(socket_cliente);
+        WSACleanup();
+        cerrar_dibujo();
+        return 1;
+    }
+
+    int tam_direccion_servidor = sizeof(direccion_servidor);
+    int encontrado = -1;
+    while(encontrado == -1){
+        int bytes_recibidos = recvfrom(socket_cliente, (char *)buffer, TAM_MTU, 0, (struct sockaddr *)&direccion_servidor, &tam_direccion_servidor);
+
+        if(bytes_recibidos > 0){ // si hemos recibido algo...
+            PaqueteDesconectarAck paqueteDesconectarAck;
+            memcpy(&paqueteDesconectarAck, buffer, sizeof(paqueteDesconectarAck));
+            if(paqueteDesconectarAck.cabecera.tipoPaquete == PACKET_TYPE_ACK){
+                printHora("Desconectado");
+                encontrado = 1;
+            } else {
+                printHora("Respuesta desconocida");
+            }
+        }
+    }
+
+
+
     printHora("Desconectado");
-    closesocket(cliente_sock);
+    closesocket(socket_cliente);
     WSACleanup();
     cerrar_dibujo();
 

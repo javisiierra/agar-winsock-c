@@ -27,6 +27,11 @@
         "xstring": "c",
         "xutility": "c",
         "target": "c",
-        "raylib.h": "c"
+        "raylib.h": "c",
+        "stdint.h": "c",
+        "locale": "c",
+        "xlocmes": "c",
+        "xlocnum": "c",
+        "stdbool.h": "c"
     }
 }

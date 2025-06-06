@@ -12,6 +12,12 @@ void inicializar_dibujo() {
 }
 
 Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id) {
+    for(int i = 0; i < num_entidades; i++) {
+        printf("Entidad %d: (%f, %f)\n", entidades[i].id, entidades[i].pos.x, entidades[i].pos.y);
+    }
+
+
+
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
