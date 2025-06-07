@@ -36,11 +36,12 @@ Use a terminal or your preferred C build system. Here’s how to compile manuall
   	gcc cliente.c dibujo.c -o cliente.exe -L"./lib" -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 ```
 
 > **Note:** Ensure `libraylib.a` and `raylib.h` are placed in `/lib` and `/include`, respectively.
-
+```
 ### 3. Run the Game
 
 Start the server first:
 
+```bash
 ./servidor
 ```
 
