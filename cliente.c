@@ -20,6 +20,8 @@ typedef enum {
 
 Entidad miEntidad;
 
+int debugger = 0;
+
 void printHora(char *mensaje) {
     SYSTEMTIME st;
     GetSystemTime(&st);
@@ -90,14 +92,17 @@ int main(){
     QueryPerformanceCounter(&tiempo_ultimo_tick_qpc); // Tiempo inicial del primer tick
 
 
-
+    // --- NUEVO: Variables para la lógica de conexión robusta ---
+    LARGE_INTEGER tiempo_inicio_espera_conexion;
+    int intentos_conexion = 0;
+    const int MAX_INTENTOS_CONEXION = 5;
+    const long long TIMEOUT_CONEXION_MICROSEGUNDOS = 2000000LL; // 2 segundos
 
 
 
     int bytes_recibidos;
     int running = 1;
     int intentos_desconexion = 0;
-    int intentos_conexion = 0;
     while(running == 1){
 
         if( estadoCliente != CLIENTE_DESCONECTANDO  && debe_cerrar_ventana() ){
@@ -116,7 +121,8 @@ int main(){
                 if (microsegundos_transcurridos_desde_ultimo_tick >= intervalo_objetivo_microsegundos)
                  {
                     //A.1. Miramos si el servidor nos ha mandado algun estado del mundo
-                        // --- INICIO DE LA MODIFICACIÓN ---
+
+                        // --- INICIO
 
                         // Buffer para guardar temporalmente el último paquete de estado de juego válido que recibamos.
                         char ultimoPaqueteBuffer[sizeof(PaqueteEstadoJuego)]; 
@@ -177,18 +183,13 @@ int main(){
                             // printf("Estado del juego actualizado con el paquete más reciente.\n");
                         }
 
-                        // --- FIN DE LA MODIFICACIÓN ---
+                        // --- FIN 
 
-
-                    //B.1. Obtenemos el vector de direccion
-                    for(int i = 0; i < numEntidadesActualesMundo; i++){
-                        printf("Entidad %d: %f, %f\n", i, entidades_mundo[i].pos.x, entidades_mundo[i].pos.y);
-                    }
 
 
                     Vector2D vec = actualizar_dibujo(entidades_mundo, numEntidadesActualesMundo, idCliente);
 
- // Solo para testear, vamos a generar un movimiento en circulos
+                    // Solo para testear, vamos a generar un movimiento en circulos
                     
                     // --- INICIO DEL NUEVO CÓDIGO DE TESTEO ---
                 if(bit) {
@@ -282,47 +283,80 @@ int main(){
                 break;
 
             case CLIENTE_SOLICITANDO_CONEXION:
-                if(intentos_conexion >= 10) {
+                if(intentos_conexion >= MAX_INTENTOS_CONEXION) {
+                    printHora("Se supero el numero maximo de intentos de conexion. Abortando.");
                     running = 0;
                     break;
                 }
-                printHora("Le enviamos una solicitud al servidor...");
+                intentos_conexion++;
+                printf("Enviando solicitud de union... (Intento %d/%d)\n", intentos_conexion, MAX_INTENTOS_CONEXION);
+                
                 PaqueteUnirse paqueteUnirse;
                 paqueteUnirse.header.numero_secuencia = 0;
                 paqueteUnirse.header.tipoPaquete = PACKET_TYPE_UNIRSE;
                 sendto(socket_cliente, (char *)&paqueteUnirse, sizeof(paqueteUnirse), 0, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor));
-                estadoCliente = CLIENTE_ESPERANDO_RESPUESTA;
-
-                intentos_desconexion++;
-                break;
-            case CLIENTE_ESPERANDO_RESPUESTA:
-
-                int tam_direccion_servidor = sizeof(direccion_servidor);
-                bytes_recibidos = recvfrom(socket_cliente, (char *)buffer, TAM_MTU, 0, (struct sockaddr *)&direccion_servidor, &tam_direccion_servidor);
-                if(bytes_recibidos > 0){ // si hemos recibido algo...
-                    CabeceraRUDP cabecera;
-                    memcpy(&cabecera, buffer, sizeof(CabeceraRUDP));
-
-                    if(cabecera.tipoPaquete == PACKET_TYPE_UNIDO_OK){
-                        PaqueteUnirseAceptado paqueteUnirseAceptado;
-                        memcpy(&paqueteUnirseAceptado, buffer, sizeof(PaqueteUnirseAceptado));
-                        idCliente = paqueteUnirseAceptado.id;
-                        estadoCliente = CLIENTE_CONECTADO;
-                    } else if (cabecera.tipoPaquete == PACKET_TYPE_UNIDO_RECHAZADO){
-                        PaqueteUnirseRechazado paqueteUnirseRechazado;
-                        memcpy(&paqueteUnirseRechazado, buffer, sizeof(PaqueteUnirseRechazado));
-                        estadoCliente = CLIENTE_SOLICITANDO_CONEXION;
-                        printf("Servidor me ha rechazado:\n");
-                        running = 0;
-                    } else {
-                        printHora("Respuesta desconocida");
-                        estadoCliente = CLIENTE_SOLICITANDO_CONEXION;
-                        Sleep(1000);
-                    }
-                    
-                }
                 
+                QueryPerformanceCounter(&tiempo_inicio_espera_conexion);
+                
+                estadoCliente = CLIENTE_ESPERANDO_RESPUESTA;
                 break;
+             case CLIENTE_ESPERANDO_RESPUESTA:
+                // 1. Comprobar si ha expirado el tiempo de espera (timeout)
+                QueryPerformanceCounter(&tiempo_actual_qpc);
+                long long microsegundos_esperando = (tiempo_actual_qpc.QuadPart - tiempo_inicio_espera_conexion.QuadPart) * 1000000LL / frecuencia.QuadPart;
+
+                if (microsegundos_esperando > TIMEOUT_CONEXION_MICROSEGUNDOS) {
+                    printHora("Timeout esperando respuesta del servidor. Reintentando...");
+                    estadoCliente = CLIENTE_SOLICITANDO_CONEXION; // Volver al estado anterior para reenviar
+                    break; // Salir del switch para que el próximo ciclo reenvíe la solicitud
+                }
+
+                // 2. Si no hay timeout, intentar leer del socket
+                // Usamos un bucle para procesar todos los paquetes que hayan llegado.
+                bool conexion_resuelta = false;
+                while (!conexion_resuelta) {
+                    int tam_direccion_servidor = sizeof(direccion_servidor);
+                    bytes_recibidos = recvfrom(socket_cliente, buffer, TAM_MTU, 0, (struct sockaddr *)&direccion_servidor, &tam_direccion_servidor);
+
+                    if (bytes_recibidos > 0) {
+                        CabeceraRUDP* cabecera = (CabeceraRUDP*)buffer;
+
+                        if (cabecera->tipoPaquete == PACKET_TYPE_UNIDO_OK) {
+                            // if(debugger <= 3){
+                            //     printHora("SIMULANDO PAQUETE UNIDO_OK PERDIDO");
+                            //     debugger++;
+                            //     continue;
+                            // }
+                            printHora("¡Servidor nos ha aceptado!");
+                            PaqueteUnirseAceptado* paqueteAceptado = (PaqueteUnirseAceptado*)buffer;
+                            idCliente = paqueteAceptado->id;
+                            estadoCliente = CLIENTE_CONECTADO;
+                            conexion_resuelta = true; // Salimos del bucle interno y del switch
+                        } else if (cabecera->tipoPaquete == PACKET_TYPE_UNIDO_RECHAZADO) {
+                            printHora("Servidor nos ha rechazado la conexion.");
+                            running = 0;
+                            conexion_resuelta = true; // Salimos para terminar el programa
+                        } else {
+                            // Ignoramos los paquetes que no sean PACKET_TYPE_UNIDO_RECHAZADO o PACKET_TYPE_UNIDO_OK
+                            printf("Recibido paquete inesperado (tipo %d) mientras se esperaba conexion. Ignorando.\n", cabecera->tipoPaquete);
+                        }
+                    } else if (bytes_recibidos == SOCKET_ERROR) {
+                        int error = WSAGetLastError();
+                        if (error == WSAEWOULDBLOCK) {
+                            // No hay más datos por ahora. Salimos del bucle interno y esperamos
+                            // a la siguiente iteración del bucle principal (while(running)).
+                            break;
+                        } else {
+                            printf("recvfrom fallo con error critico: %d\n", error);
+                            running = 0;
+                            conexion_resuelta = true;
+                        }
+                    } else {
+                        // recvfrom devolvió 0.
+                        break;
+                    }
+                } // Fin del bucle while (!conexion_resuelta)
+                break; // Salir del switch
 
             case CLIENTE_DESCONECTANDO:
             

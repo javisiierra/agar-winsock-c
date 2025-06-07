@@ -207,7 +207,6 @@ int main()
         return 1;
     }
 
-
     // 3. Configuramos la direccion en la que el servidor va a estar escuchando. Configuramos el puerto en el que el servidor estara escuchando.
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
@@ -357,6 +356,25 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr) {
             CabeceraRUDP cabeceraRespuesta;
             cabeceraRespuesta.numero_secuencia = cabecera.numero_secuencia + 1; // deberia ser un 2
 
+            // primero revisamos que no haya un cliente ya con esa IP
+            int found = 0;
+            for( int i = 0; i < arrayClientes.numero_clientes; i++) {
+                if(arrayClientes.clientes[i].direccion.sin_addr.S_un.S_addr == direccion_cliente.sin_addr.S_un.S_addr
+                && arrayClientes.clientes[i].direccion.sin_port == direccion_cliente.sin_port) {
+                    cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_OK;
+                    PaqueteUnirseAceptado paqueteUnirseAceptado = {cabeceraRespuesta, arrayClientes.clientes[i].idCliente};
+
+                    sendto(socket_servidor, (char *) &paqueteUnirseAceptado, sizeof(paqueteUnirseAceptado), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
+                    fprintf(stderr, "El cliente ha intentado conectarse de nuevo con la misma IP. Le enviamos un paquete de PACKET_TYPE_UNIDO_OK.\n");
+                    found = 1;
+                    break;
+                }
+            }
+            if(found == 1) {
+                break;
+            }
+            printf("-----------------");
+
             if(arrayClientes.numero_clientes >= MAX_CLIENTES){
                 // rechazamos la solicitud
                 cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_RECHAZADO;
@@ -365,7 +383,6 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr) {
                 // le envio al cliente su mensaje
                 sendto(socket_servidor, (char *) &paqueteUnirseRechazado, sizeof(paqueteUnirseRechazado), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
             } else {
-            
                 cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_OK;
                 uint32_t idCliente = arrayClientes.contadorID++;
                 addCliente_info(&arrayClientes, idCliente, direccion_cliente, cabecera.numero_secuencia);
@@ -447,7 +464,7 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr) {
 
 void process_game_tick()
 {
-    printHora("Inicio TICK");
+    //>> printHora("Inicio TICK");
     MensajeRecibido msg;
     char buffer[256];
 
@@ -552,7 +569,7 @@ void process_game_tick()
 
     for (uint32_t i = 0; i < arrayClientes.numero_clientes; i++)
     {
-        printHora("Enviando el estado del juego a un cliente.");
+        //>> printHora("Enviando el estado del juego a un cliente.");
         Cliente_info ci = arrayClientes.clientes[i];
         sendto(socket_servidor,
                (char*)&paquete,
@@ -562,7 +579,7 @@ void process_game_tick()
                sizeof(ci.direccion));
     }
 
-    printHora("Fin TICK");
+    //>> printHora("Fin TICK");
 }
 
 void queue_init(ThreadSafeQueue *q)
@@ -704,11 +721,6 @@ void respawnAlimentoEnIndice(ArrayEntidadesConMutex *arrayAlimentos, int indice)
     // 3. Actualizamos directamente la posición de la entidad en el índice especificado
     arrayAlimentos->entidades[indice].pos.x = nuevaPosX;
     arrayAlimentos->entidades[indice].pos.y = nuevaPosY;
-
-    // (Opcional) Log para confirmar la acción
-    // char buffer[128];
-    // sprintf(buffer, "Alimento en índice %d reapareció en (%.2f, %.2f)", indice, nuevaPosX, nuevaPosY);
-    // printHora(buffer);
 
     LeaveCriticalSection(&arrayAlimentos->mutex); // <-- LIBERAMOS EL ARRAY
 }

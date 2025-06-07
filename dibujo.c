@@ -12,11 +12,6 @@ void inicializar_dibujo() {
 }
 
 Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id) {
-    for(int i = 0; i < num_entidades; i++) {
-        printf("Entidad %d: (%f, %f)\n", entidades[i].id, entidades[i].pos.x, entidades[i].pos.y);
-    }
-
-
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
@@ -28,16 +23,12 @@ Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id)
 
     char buffer[100];
 
-    sprintf(buffer, "Coordenadas del mouse: (%f, %f)", mouse_pos.x, mouse_pos.y);
-    DrawText(buffer, 20, 50, 20, BLACK);
+
 
     // Solo mueve si click derecho está presionado
     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
         direction_vector.x = mouse_pos.x - screen_center.x;
         direction_vector.y = mouse_pos.y - screen_center.y;
-
-        sprintf(buffer, "Coordenadas del mouse respecto a centro: (%f, %f)", direction_vector.x, direction_vector.y);
-        DrawText(buffer, 20, 80, 20, BLACK);
 
         // normalizamos el vector
         float magnitude = sqrt(direction_vector.x * direction_vector.x + direction_vector.y * direction_vector.y);
@@ -50,8 +41,7 @@ Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id)
         direction_vector.x *= 0.1f;
         direction_vector.y *= 0.1f;
 
-        sprintf(buffer, "Coordenadas del mouse respecto a centro normalizado: (%f, %f)", direction_vector.x, direction_vector.y);
-        DrawText(buffer, 20, 120, 20, BLACK);
+
     } else {
         sprintf(buffer, "Coordenadas del mouse respecto a centro: (0.000000, 0.000000)");
         DrawText(buffer, 20, 80, 20, BLACK);
@@ -70,8 +60,7 @@ Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id)
         }
     }
     
-    sprintf(buffer, "Coordenadas jugador: (%f, %f)", player_pos.x, player_pos.y);
-    DrawText(buffer, 20, 150, 20, BLACK);
+
 
     // Encontrar el offset de la cámara para centrarlo en player_pos
     float offsetX = screenWidth / 2.0f - (player_pos.x * 100);
@@ -121,9 +110,7 @@ Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id)
 
     // ========== FIN DEL GRID Y EJES ==========
 
-    // Dibujar título
-    DrawText("Estado del Mundo", 20, 20, 20, BLACK);
-    
+
     // Dibujar cada entidad
     for(int i = 0; i < num_entidades; i++) {
         if(entidades[i].id == 0) continue; // Skip if ID is 0
@@ -164,6 +151,24 @@ Vector2D actualizar_dibujo(Entidad* entidades, int num_entidades, int player_id)
     // Mostrar instrucciones
     DrawText("Mueve el ratón manteniendo pulsado el botón derecho", 20, screenHeight - 60, 16, DARKGRAY);
     DrawText("Tu celula solo se movera si pulsas el click derecho", 20, screenHeight - 40, 16, DARKGRAY);
+
+
+    sprintf(buffer, "Coordenadas del mouse: (%f, %f)", mouse_pos.x, mouse_pos.y);
+    DrawText(buffer, 20, 50, 20, BLACK);
+
+    sprintf(buffer, "Coordenadas del mouse respecto a centro: (%f, %f)", direction_vector.x, direction_vector.y);
+    DrawText(buffer, 20, 80, 20, BLACK);
+
+    sprintf(buffer, "Coordenadas del mouse respecto a centro normalizado: (%f, %f)", direction_vector.x, direction_vector.y);
+    DrawText(buffer, 20, 120, 20, BLACK);
+
+    // Dibujar título
+    DrawText("Estado del Mundo", 20, 20, 20, BLACK);
+
+    sprintf(buffer, "Coordenadas jugador: (%f, %f)", player_pos.x, player_pos.y);
+    DrawText(buffer, 20, 150, 20, BLACK);
+
+
     DrawText("Tu ID: ", screenWidth - 150, 20, 20, BLACK);
     DrawText(TextFormat("%d", player_id), screenWidth - 70, 20, 20, BLUE);
 
