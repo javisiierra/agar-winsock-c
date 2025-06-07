@@ -41,7 +41,6 @@ Use a terminal or your preferred C build system. Here’s how to compile manuall
 
 Start the server first:
 
-```bash
 ./servidor
 ```
 
