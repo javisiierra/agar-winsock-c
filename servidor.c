@@ -264,6 +264,9 @@ int main()
 
     }
 
+
+
+    queue_destroy(&colaMensajes);
     closesocket(socket_servidor);
     WSACleanup();
     return 0;
