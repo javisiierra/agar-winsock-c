@@ -45,6 +45,7 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr);
 void mantenerNivelDeAlimentos(ArrayEntidadesConMutex *arrayAlimentos);
 void respawnAlimentoEnIndice(ArrayEntidadesConMutex *arrayAlimentos, int indice);
 
+
 ArrayEntidadesConMutex arrayEntidadesJugadores;
 ArrayEntidadesConMutex arrayEntidadesAlimentos;
 
@@ -127,6 +128,8 @@ typedef struct
     CRITICAL_SECTION mutex;
     CONDITION_VARIABLE cond;
 } ThreadSafeQueue;
+
+void queue_destroy(ThreadSafeQueue *q);
 
 int contador_entidades = 0;
 
