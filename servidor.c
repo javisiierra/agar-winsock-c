@@ -307,7 +307,7 @@ void deleteCliente_info(ArrayCliente_info* array, uint32_t idCliente) {
 
     if (found_index != -1) {
         // 2. Cliente encontrado: Eliminar su entidad de juego
-        removeArrayEntidadesConMutex(&arrayEntidadesJugadores, idCliente); // Asegúrate de que esto también use mutex
+        removeArrayEntidadesConMutex(&arrayEntidadesJugadores, idCliente);
         
         // 3. Compactar el array: Mover los elementos posteriores un lugar hacia adelante
         for (int i = found_index; i < array->numero_clientes - 1; i++) {
@@ -702,11 +702,6 @@ void mantenerNivelDeAlimentos(ArrayEntidadesConMutex *arrayAlimentos)
         LeaveCriticalSection(&arrayAlimentos->mutex); // No olvides liberar el mutex antes de salir
         return;
     }
-    
-    // (Opcional) Log para saber qué está pasando
-    // char buffer[100];
-    // sprintf(buffer, "Faltan %d alimentos. Generando...", alimentos_a_crear);
-    // printHora(buffer);
 
     // 3. Bucle para crear la cantidad exacta de alimentos que faltan
     for (int i = 0; i < alimentos_a_crear; i++)
@@ -739,15 +734,13 @@ void respawnAlimentoEnIndice(ArrayEntidadesConMutex *arrayAlimentos, int indice)
     float RANGO_MAPA_X = (float)MAP_LIMIT_X;
     float RANGO_MAPA_Y = (float)MAP_LIMIT_Y;
 
-    EnterCriticalSection(&arrayAlimentos->mutex); // <-- BLOQUEAMOS EL ARRAY
+    EnterCriticalSection(&arrayAlimentos->mutex); 
 
     // 1. Verificamos que el índice sea válido para evitar errores
     if (indice < 0 || indice >= arrayAlimentos->num_entidades)
     {
-        // El índice está fuera de los límites, no hacemos nada.
-        // Opcional: imprimir un mensaje de advertencia.
-        // printHora("Advertencia: Se intentó hacer respawn de un alimento en un índice no válido.");
-        LeaveCriticalSection(&arrayAlimentos->mutex); // No olvides liberar el mutex
+
+        LeaveCriticalSection(&arrayAlimentos->mutex);
         return;
     }
 
@@ -759,7 +752,7 @@ void respawnAlimentoEnIndice(ArrayEntidadesConMutex *arrayAlimentos, int indice)
     arrayAlimentos->entidades[indice].pos.x = nuevaPosX;
     arrayAlimentos->entidades[indice].pos.y = nuevaPosY;
 
-    LeaveCriticalSection(&arrayAlimentos->mutex); // <-- LIBERAMOS EL ARRAY
+    LeaveCriticalSection(&arrayAlimentos->mutex); 
 }
 
 // Función para generar posición aleatoria dentro del mapa

@@ -142,7 +142,7 @@ int main(){
 
                                 if (cabecera->tipoPaquete == PACKET_TYPE_ESTADO_JUEGO && bytes_recibidos == sizeof(PaqueteEstadoJuego)) {
                                     // Es un paquete de estado de juego válido. Guardamos su contenido.
-                                    // Si llegan más, este se sobrescribirá, lo cual es exactamente lo que queremos.
+                                    // Si llegan más, este se sobrescribirá.
                                     memcpy(ultimoPaqueteBuffer, buffer, sizeof(PaqueteEstadoJuego));
                                     seRecibioUnPaqueteValido = true;
                                 }
@@ -152,17 +152,14 @@ int main(){
                             } else if (bytes_recibidos == SOCKET_ERROR) {
                                 int error = WSAGetLastError();
                                 if (error == WSAEWOULDBLOCK) {
-                                    // ¡Esto es lo esperado! Significa que no hay más mensajes en la cola.
                                     // Rompemos el bucle para proceder a procesar el último paquete que guardamos.
                                     break; 
                                 } else {
                                     // Ocurrió un error de red real.
-                                    // Puedes imprimirlo para depurar si es necesario.
-                                    // printf("recvfrom falló con error: %d\n", error);
                                     break;
                                 }
                             } else {
-                                // recvfrom devolvió 0 o un valor inesperado. La conexión podría estar cerrada.
+                                // recvfrom devolvió 0 o un valor inesperado.
                                 break;
                             }
                         }
@@ -179,8 +176,6 @@ int main(){
                                 entidades_mundo[i] = paqueteEstadoJuego->entidades[i];
                             }
                             
-                            // Opcional: puedes poner un log para saber que se actualizó
-                            // printf("Estado del juego actualizado con el paquete más reciente.\n");
                         }
 
                         // --- FIN 
