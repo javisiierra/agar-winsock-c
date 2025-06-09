@@ -15,6 +15,7 @@
 #include <stdlib.h>
 
 #define DEFAULT_PLAYER_SIZE 1
+#define MAX_PLAYER_SIZE 20  // Establece un tamaño máximo para los jugadores
 
 typedef struct
 {
@@ -44,6 +45,7 @@ Cliente_info clientes [MAX_CLIENTES];
 void recibir_mensaje(SOCKET* socket_servidor_ptr);
 void mantenerNivelDeAlimentos(ArrayEntidadesConMutex *arrayAlimentos);
 void respawnAlimentoEnIndice(ArrayEntidadesConMutex *arrayAlimentos, int indice);
+Vector2D generarPosicionAleatoria(); // Add this function prototype
 
 
 ArrayEntidadesConMutex arrayEntidadesJugadores;
@@ -392,12 +394,15 @@ void recibir_mensaje(SOCKET* socket_servidor_ptr) {
                 cabeceraRespuesta.tipoPaquete = PACKET_TYPE_UNIDO_OK;
                 uint32_t idCliente = arrayClientes.contadorID++;
                 addCliente_info(&arrayClientes, idCliente, direccion_cliente, cabecera.numero_secuencia);
-                Entidad nuevaEntidadJugador = {idCliente, ENTIDAD_JUGADOR, {0, 0}, {0, 0}, DEFAULT_PLAYER_SIZE};
+                
+                // Usar posición aleatoria en lugar de (0,0)
+                Vector2D posInicial = generarPosicionAleatoria();
+                Entidad nuevaEntidadJugador = {idCliente, ENTIDAD_JUGADOR, posInicial, {0, 0}, DEFAULT_PLAYER_SIZE};
+                
                 addArrayEntidadesConMutex(&arrayEntidadesJugadores, nuevaEntidadJugador);
                 PaqueteUnirseAceptado paqueteUnirseAceptado = {cabeceraRespuesta, idCliente};
                 // le envio al cliente su mensaje
                 sendto(socket_servidor,(char *) &paqueteUnirseAceptado, sizeof(paqueteUnirseAceptado), 0, (struct sockaddr *)&direccion_cliente, sizeof(direccion_cliente));
-
             }
             break;
         case PACKET_TYPE_UNIDO_OK:
@@ -519,8 +524,14 @@ void process_game_tick()
             // asumiendo tam se multiplica por 10 en píxeles y pos son unidades
             if (dist2 <= radSum*radSum)
             {
-                // El jugador come la comida
-                jug->tam += food->tam;
+                // El jugador come la comida con límite de tamaño
+                if (jug->tam < MAX_PLAYER_SIZE) {
+                    jug->tam += food->tam;
+                    // Asegurarse de no exceder el tamaño máximo
+                    if (jug->tam > MAX_PLAYER_SIZE) {
+                        jug->tam = MAX_PLAYER_SIZE;
+                    }
+                }
                 respawnAlimentoEnIndice(&arrayEntidadesAlimentos, j);
             }
         }
@@ -541,15 +552,35 @@ void process_game_tick()
             {
                 if (a->tam > b->tam)
                 {
-                    a->tam += b->tam;
+                    // El jugador a come al jugador b con límite de tamaño
+                    if (a->tam < MAX_PLAYER_SIZE) {
+                        a->tam += b->tam;
+                        // Asegurarse de no exceder el tamaño máximo
+                        if (a->tam > MAX_PLAYER_SIZE) {
+                            a->tam = MAX_PLAYER_SIZE;
+                        }
+                    }
                     b->tam = 1;
-                    b->pos.x = 0; b->pos.y = 0;
+                    // Respawn del jugador b en posición aleatoria
+                    Vector2D nuevaPos = generarPosicionAleatoria();
+                    b->pos.x = nuevaPos.x; 
+                    b->pos.y = nuevaPos.y;
                 }
                 else if (b->tam > a->tam)
                 {
-                    b->tam += a->tam;
+                    // El jugador b come al jugador a con límite de tamaño
+                    if (b->tam < MAX_PLAYER_SIZE) {
+                        b->tam += a->tam;
+                        // Asegurarse de no exceder el tamaño máximo
+                        if (b->tam > MAX_PLAYER_SIZE) {
+                            b->tam = MAX_PLAYER_SIZE;
+                        }
+                    }
                     a->tam = 1;
-                    a->pos.x = 0; a->pos.y = 0;
+                    // Respawn del jugador a en posición aleatoria
+                    Vector2D nuevaPos = generarPosicionAleatoria();
+                    a->pos.x = nuevaPos.x; 
+                    a->pos.y = nuevaPos.y;
                 }
                 // si iguales, no pasa nada
             }
@@ -729,4 +760,12 @@ void respawnAlimentoEnIndice(ArrayEntidadesConMutex *arrayAlimentos, int indice)
     arrayAlimentos->entidades[indice].pos.y = nuevaPosY;
 
     LeaveCriticalSection(&arrayAlimentos->mutex); // <-- LIBERAMOS EL ARRAY
+}
+
+// Función para generar posición aleatoria dentro del mapa
+Vector2D generarPosicionAleatoria() {
+    Vector2D pos;
+    pos.x = ((float)rand() / RAND_MAX) * (MAP_LIMIT_X * 2) - MAP_LIMIT_X;
+    pos.y = ((float)rand() / RAND_MAX) * (MAP_LIMIT_Y * 2) - MAP_LIMIT_Y;
+    return pos;
 }
